@@ -10,7 +10,7 @@ import SwiftUI
 @main
 struct macchewieApp: App {
     var body: some Scene {
-        MenuBarExtra("MacChewie", systemImage: "gear") {
+        MenuBarExtra("MacChewie", systemImage: "star.circle") {
             MenuBarView()
         }
         .menuBarExtraStyle(.window)
