@@ -1,0 +1,24 @@
+{
+  "name": "macchewie",
+  "version": "1.0.0",
+  "description": "A macOS menu bar app that connects to your Dust.tt AI agent for seamless chat interactions.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camilleduprat/macchewie.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/camilleduprat/macchewie/issues"
+  },
+  "homepage": "https://github.com/camilleduprat/macchewie#readme",
+  "dependencies": {
+    "@dust-tt/client": "^1.1.13"
+  }
+}
