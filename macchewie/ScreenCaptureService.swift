@@ -6,171 +6,214 @@
 //
 
 import Foundation
-import AppKit
 import CoreGraphics
+import AppKit
+import SwiftUI
+
+// MARK: - Detected Design Element
+struct DetectedDesignElement {
+    let id: UUID = UUID()
+    let boundingBox: CGRect
+    let type: DesignElementType
+    let confidence: Float
+}
+
+enum DesignElementType: String, Identifiable, CaseIterable {
+    var id: String { self.rawValue }
+    case button = "Button"
+    case text = "Text"
+    case textField = "Text Field"
+    case image = "Image"
+    case container = "Container"
+    case card = "Card"
+    case navigation = "Navigation"
+    case list = "List"
+    case table = "Table"
+    case header = "Header"
+    case footer = "Footer"
+    case sidebar = "Sidebar"
+    case modal = "Modal"
+    case toolbar = "Toolbar"
+    case unknown = "Unknown"
+
+    var color: Color {
+        switch self {
+        case .button:
+            return .blue
+        case .text, .textField:
+            return .green
+        case .image:
+            return .orange
+        case .container:
+            return .purple
+        case .card:
+            return .red
+        case .navigation:
+            return .indigo
+        case .list, .table:
+            return .teal
+        case .header, .footer:
+            return .brown
+        case .sidebar:
+            return .cyan
+        case .modal:
+            return .pink
+        case .toolbar:
+            return .yellow
+        case .unknown:
+            return .gray
+        }
+    }
+}
 
 // MARK: - Screen Capture Service
-@MainActor
 class ScreenCaptureService: ObservableObject {
-    @Published var hasPermission: Bool = false
-    @Published var isCapturing: Bool = false
+    @Published var isScanning = false
+    @Published var detectedElements: [DetectedDesignElement] = []
+    @Published var currentScreenImage: NSImage?
+    @Published var errorMessage: String?
     
-    private var lastScreenshot: NSImage?
+    private let openAIService = OpenAIVisionService()
     
     init() {
-        checkPermissions()
+        print("🔍 [DEBUG] ScreenCaptureService initialized with OpenAI")
     }
     
-    // MARK: - Permission Management
-    
-    func checkPermissions() {
-        // Check if we have screen recording permission
-        hasPermission = CGPreflightScreenCaptureAccess()
-    }
-    
-    func requestPermissions() {
-        guard !hasPermission else { return }
-        
-        // This will show the system permission dialog
-        let _ = CGRequestScreenCaptureAccess()
-        
-        // Check again after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.checkPermissions()
+    func captureAndAnalyzeScreen() async {
+        print("🔍 [DEBUG] Starting screen capture and OpenAI analysis")
+
+        await MainActor.run {
+            print("🔍 [DEBUG] Setting scanning state to true")
+            isScanning = true
+            errorMessage = nil
+            detectedElements = []
         }
-    }
-    
-    // MARK: - Screen Capture
-    
-    func captureScreen() -> NSImage? {
-        guard hasPermission else {
-            print("⚠️ No screen recording permission")
-            return nil
-        }
-        
-        // Get the main display
-        let mainDisplayID = CGMainDisplayID()
-        
-        // Create screen capture
-        guard let cgImage = CGDisplayCreateImage(mainDisplayID) else {
-            print("❌ Could not create screen capture")
-            return nil
-        }
-        
-        // Convert to NSImage
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        
-        return image
-    }
-    
-    func captureWindow(_ windowID: CGWindowID) -> NSImage? {
-        guard hasPermission else {
-            print("⚠️ No screen recording permission")
-            return nil
-        }
-        
-        guard let cgImage = CGWindowListCreateImage(
-            CGRect.null,
-            .optionIncludingWindow,
-            windowID,
-            .bestResolution
-        ) else {
-            print("❌ Could not capture window \(windowID)")
-            return nil
-        }
-        
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        
-        return image
-    }
-    
-    // MARK: - Change Detection
-    
-    func hasSignificantChanges(from oldImage: NSImage?, to newImage: NSImage) -> Bool {
-        guard let oldImage = oldImage else { return true } // First capture
-        
-        // Quick comparison using image hashes
-        let oldHash = imageHash(oldImage)
-        let newHash = imageHash(newImage)
-        
-        // Consider it changed if hash is different
-        return oldHash != newHash
-    }
-    
-    private func imageHash(_ image: NSImage) -> String {
-        // Simple hash based on image size and a few sample pixels
-        let size = image.size
-        let width = Int(size.width)
-        let height = Int(size.height)
-        
-        // Sample a few pixels for quick comparison
-        var hashComponents: [String] = ["\(width)x\(height)"]
-        
-        // Sample pixels at strategic locations (corners and center)
-        let samplePoints = [
-            CGPoint(x: 0, y: 0),
-            CGPoint(x: CGFloat(width - 1), y: 0),
-            CGPoint(x: 0, y: CGFloat(height - 1)),
-            CGPoint(x: CGFloat(width - 1), y: CGFloat(height - 1)),
-            CGPoint(x: CGFloat(width / 2), y: CGFloat(height / 2))
-        ]
-        
-        for point in samplePoints {
-            if let color = getPixelColor(in: image, at: point) {
-                hashComponents.append("\(color.red),\(color.green),\(color.blue)")
+
+        // Capture screen
+        print("🔍 [DEBUG] Attempting to capture screen")
+        guard let screenImage = captureScreen() else {
+            print("❌ [DEBUG] Failed to capture screen")
+            await MainActor.run {
+                errorMessage = "Failed to capture screen"
+                isScanning = false
             }
+            return
         }
-        
-        return hashComponents.joined(separator: "|")
+
+        print("✅ [DEBUG] Screen captured successfully, size: \(screenImage.size)")
+
+        await MainActor.run {
+            currentScreenImage = screenImage
+        }
+
+        // Analyze with OpenAI
+        print("🤖 [DEBUG] Starting OpenAI analysis")
+        let aiElements = await openAIService.analyzeScreenForUIElements(screenImage)
+        print("🤖 [DEBUG] OpenAI analysis complete, found \(aiElements.count) elements")
+
+        // Convert OpenAI elements to our format
+        let convertedElements = aiElements.compactMap { aiElement -> DetectedDesignElement? in
+            let elementType = mapOpenAITypeToDesignType(aiElement.type)
+            return DetectedDesignElement(
+                boundingBox: aiElement.boundingBox,
+                type: elementType,
+                confidence: aiElement.confidence
+            )
+        }
+
+        print("✅ [DEBUG] Converted \(convertedElements.count) elements")
+
+        await MainActor.run {
+            detectedElements = convertedElements
+            isScanning = false
+            if let error = openAIService.errorMessage {
+                errorMessage = error
+            }
+            print("✅ [DEBUG] Screen capture and OpenAI analysis completed successfully")
+        }
     }
     
-    private func getPixelColor(in image: NSImage, at point: CGPoint) -> (red: Float, green: Float, blue: Float)? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    private func captureScreen() -> NSImage? {
+        print("🔍 [DEBUG] Capturing screen using CGDisplayCreateImage")
+        
+        guard let mainDisplay = CGDisplayCreateImage(CGMainDisplayID()) else {
+            print("❌ [DEBUG] Failed to create screen image")
             return nil
         }
         
-        let width = cgImage.width
-        let height = cgImage.height
+        let imageSize = CGSize(width: mainDisplay.width, height: mainDisplay.height)
+        print("✅ [DEBUG] Screen image created, size: \(imageSize)")
         
-        // Clamp point to image bounds
-        let x = max(0, min(Int(point.x), width - 1))
-        let y = max(0, min(Int(point.y), height - 1))
+        return NSImage(cgImage: mainDisplay, size: imageSize)
+    }
+    
+    func getImageCrop(for element: DetectedDesignElement) -> NSImage? {
+        print("🔍 [DEBUG] Getting image crop for element: \(element.type.rawValue)")
         
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel
-        let bitsPerComponent = 8
-        
-        var pixelData = [UInt8](repeating: 0, count: bytesPerPixel)
-        
-        guard let context = CGContext(
-            data: &pixelData,
-            width: 1,
-            height: 1,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
+        guard let screenImage = currentScreenImage else {
+            print("❌ [DEBUG] No screen image available")
             return nil
         }
         
-        context.draw(cgImage, in: CGRect(x: -x, y: -y, width: width, height: height))
+        let cropRect = element.boundingBox
         
-        let red = Float(pixelData[0]) / 255.0
-        let green = Float(pixelData[1]) / 255.0
-        let blue = Float(pixelData[2]) / 255.0
+        // Ensure crop rect is within image bounds
+        let imageSize = screenImage.size
+        let clampedRect = CGRect(
+            x: max(0, min(cropRect.origin.x, imageSize.width - cropRect.width)),
+            y: max(0, min(cropRect.origin.y, imageSize.height - cropRect.height)),
+            width: min(cropRect.width, imageSize.width - max(0, cropRect.origin.x)),
+            height: min(cropRect.height, imageSize.height - max(0, cropRect.origin.y))
+        )
         
-        return (red: red, green: green, blue: blue)
+        print("🔍 [DEBUG] Cropping image with rect: \(clampedRect)")
+        
+        guard let cgImage = screenImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let croppedCGImage = cgImage.cropping(to: clampedRect) else {
+            print("❌ [DEBUG] Failed to crop image")
+            return nil
+        }
+        
+        let croppedImage = NSImage(cgImage: croppedCGImage, size: clampedRect.size)
+        print("✅ [DEBUG] Image cropped successfully, size: \(croppedImage.size)")
+        
+        return croppedImage
     }
     
-    // MARK: - Continuous Capture Support
-    
-    func updateLastScreenshot(_ image: NSImage) {
-        lastScreenshot = image
-    }
-    
-    func getLastScreenshot() -> NSImage? {
-        return lastScreenshot
+    private func mapOpenAITypeToDesignType(_ openAIType: String) -> DesignElementType {
+        let lowercased = openAIType.lowercased()
+        
+        switch lowercased {
+        case let type where type.contains("button"):
+            return .button
+        case let type where type.contains("text field") || type.contains("input"):
+            return .textField
+        case let type where type.contains("text"):
+            return .text
+        case let type where type.contains("image"):
+            return .image
+        case let type where type.contains("card"):
+            return .card
+        case let type where type.contains("navigation") || type.contains("nav"):
+            return .navigation
+        case let type where type.contains("list"):
+            return .list
+        case let type where type.contains("table"):
+            return .table
+        case let type where type.contains("header"):
+            return .header
+        case let type where type.contains("footer"):
+            return .footer
+        case let type where type.contains("sidebar"):
+            return .sidebar
+        case let type where type.contains("modal") || type.contains("dialog"):
+            return .modal
+        case let type where type.contains("toolbar"):
+            return .toolbar
+        case let type where type.contains("container"):
+            return .container
+        default:
+            return .unknown
+        }
     }
 }

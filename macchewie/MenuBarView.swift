@@ -7,6 +7,28 @@
 
 import SwiftUI
 import Foundation
+import AppKit
+
+// MARK: - Message Structure
+enum MessageSender {
+    case user
+    case agent
+}
+
+struct ChatMessage: Identifiable {
+    let id = UUID()
+    let text: String
+    let image: NSImage?
+    let sender: MessageSender
+    let timestamp: Date
+    
+    init(text: String, image: NSImage? = nil, sender: MessageSender = .user) {
+        self.text = text
+        self.image = image
+        self.sender = sender
+        self.timestamp = Date()
+    }
+}
 
 // MARK: - Agent Output Models
 struct AgentOutput {
@@ -206,42 +228,161 @@ struct AgentOutputView: View {
 
 struct MenuBarView: View {
     @State private var chatText: String = ""
-    @State private var messages: [String] = []
+    @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
     @StateObject private var dustService = DustService()
+    @StateObject private var screenCaptureService = ScreenCaptureService()
+    @StateObject private var designSelectionManager = DesignSelectionWindowManager()
     @State private var selectedImage: NSImage?
-    @State private var isEyeSelected: Bool = false
-    @StateObject private var screenScanner = ScreenScanner()
-    @State private var showDebugPanel: Bool = false
+    @State private var loadingMessageIndex: Int = 0
+    @State private var loadingTimer: Timer?
+    @State private var selectedTags: Set<String> = []
+    
+    // Loading messages to cycle through
+    private let loadingMessages = [
+        "Analysing the image",
+        "Fetching proper refs", 
+        "Mixing it all together",
+        "Cooking a dope answer",
+        "Sugar coating the truth"
+    ]
+    
+    // Computed property for status message
+    private var statusMessage: String {
+        if screenCaptureService.isScanning {
+            return "🤖 Analyzing screen with AI..."
+        } else {
+            return ""
+        }
+    }
+    
+    // Computed property for placeholder text
+    private var placeholderText: String {
+        if isLoading {
+            return loadingMessages[loadingMessageIndex]
+        } else {
+            return "What is this design?"
+        }
+    }
+    
+    init() {
+        print("📱 [DEBUG] MenuBarView initializing")
+    }
+    
+    // Start cycling through loading messages
+    private func startLoadingMessages() {
+        loadingMessageIndex = 0
+        loadingTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
+            loadingMessageIndex = (loadingMessageIndex + 1) % loadingMessages.count
+        }
+    }
+    
+    // Stop cycling through loading messages
+    private func stopLoadingMessages() {
+        loadingTimer?.invalidate()
+        loadingTimer = nil
+        loadingMessageIndex = 0
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
+            // Header section
+            HStack {
+                // Left side: Back chevron + Title
+                HStack(spacing: 8) {
+                    Button(action: {
+                        // Back action - could be used to close or navigate back
+                        print("📱 [DEBUG] Back button tapped")
+                    }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Text("Fits profiles")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.primary)
+                }
+                
+                Spacer()
+                
+                // Right side: Reset button
+                Button(action: {
+                    resetConversation()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Reset")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+            
+            // Main content
+            VStack(spacing: 16) {
             // Messages area - animated pop-in above input
             if !messages.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
+                        LazyVStack(spacing: 24) {
                             ForEach(messages.indices, id: \.self) { index in
                                 let message = messages[index]
                                 
                                 // Check if this message contains agent output format
-                                if message.contains("⭐️") || message.contains("🔴") || message.contains("🟢") || message.contains("✅") {
+                                if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
                                     // Parse and display as structured cards
-                                    let output = AgentOutputParser.parse(message)
+                                    let output = AgentOutputParser.parse(message.text)
                                     AgentOutputView(output: output) { solution in
                                         sendTaggedMessage(solution)
                                     }
                                     .padding(.horizontal, 8)
                                     .id("message-\(index)")
                                 } else {
-                                    // Display as regular message
-                                    HStack {
-                                        Text(message)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 10)
-                                            .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
-                                            .foregroundStyle(Color.primary)
-                                        Spacer()
+                                    // Display as regular message with optional image
+                                    VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 8) {
+                                        if let image = message.image {
+                                            // Display image
+                                            Image(nsImage: image)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(maxHeight: 300)
+                                                .cornerRadius(12)
+                                                .shadow(radius: 4)
+                                        }
+                                        
+                                        if !message.text.isEmpty {
+                                            HStack {
+                                                if message.sender == .agent {
+                                                    Spacer()
+                                                }
+                                                
+                                                Text(message.text)
+                                                    .padding(.horizontal, 16)
+                                                    .padding(.vertical, 10)
+                                                    .background(
+                                                        message.sender == .user 
+                                                        ? Color.accentColor.opacity(0.8) 
+                                                        : Color.accentColor.opacity(0.15), 
+                                                        in: RoundedRectangle(cornerRadius: 16)
+                                                    )
+                                                    .foregroundStyle(
+                                                        message.sender == .user 
+                                                        ? Color.white 
+                                                        : Color.primary
+                                                    )
+                                                
+                                                if message.sender == .user {
+                                                    Spacer()
+                                                }
+                                            }
+                                        }
                                     }
                                     .id("message-\(index)")
                                 }
@@ -259,159 +400,183 @@ struct MenuBarView: View {
                 }
             }
             
-            // Debug Panel
-            if showDebugPanel {
-                DebugPanelView(screenScanner: screenScanner)
-                    .padding(.horizontal, 8)
-            }
             
-            // Image preview area
-            if let selectedImage = selectedImage {
-                HStack {
-                    Image(nsImage: selectedImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 900)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                        )
+            // Status indicator - under conversation area (only for scanning)
+            if screenCaptureService.isScanning {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .progressViewStyle(CircularProgressViewStyle(tint: .green))
                     
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(Int(selectedImage.size.width))×\(Int(selectedImage.size.height))")
-                            .font(.caption)
-                            .foregroundStyle(Color.secondary)
-                        
-                        Button("Remove") {
-                            self.selectedImage = nil
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .foregroundStyle(Color.red)
-                    }
-                    
-                    Spacer()
+                    Text(statusMessage)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary.opacity(0.5))
+                        .animation(.easeInOut(duration: 0.2), value: statusMessage)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(NSColor.controlBackgroundColor))
+                        .opacity(0.8)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
             
             // Chat input - always at bottom
-            VStack(spacing: 8) {
-                // Debug and scanner info
-                HStack {
-                    Button("Debug: Add Sample Output") {
-                        if !isLoading {
-                            addSampleAgentOutput()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .foregroundStyle(isLoading ? Color.blue.opacity(0.5) : Color.blue)
-                    .disabled(isLoading)
-                    
-                    Button("Scanner Info") {
-                        showScannerInfo()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .foregroundStyle(Color.orange)
-                    .disabled(isLoading)
-                    
-                    Button(showDebugPanel ? "Hide Debug" : "Show Debug") {
-                        showDebugPanel.toggle()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .foregroundStyle(Color.purple)
-                    .disabled(isLoading)
-                    
-                    // Scanner status indicator
-                    if screenScanner.isScanning {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                                .scaleEffect(screenScanner.isScanning ? 1.2 : 1.0)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: screenScanner.isScanning)
-                            
-                            Text("Scanning")
-                                .font(.caption)
-                                .foregroundStyle(Color.secondary)
-                        }
-                    }
-                    
-                    Spacer()
-                }
+            VStack(spacing: 0) {
+                
                 
                 HStack(spacing: 4) {
-                    // Eye icon button - Screen Scanner
-                    Button(action: {
-                        if !isLoading {
-                            handleEyeButtonTap()
+                    // Screen scan button - only show when no image is uploaded
+                    if selectedImage == nil {
+                        Button(action: {
+                            if !isLoading && !screenCaptureService.isScanning {
+                                scanScreen()
+                            }
+                        }) {
+                            Image(systemName: screenCaptureService.isScanning ? "eyeglasses" : "eyeglasses.slash")
+                                .font(.system(size: 16))
+                                .foregroundColor(isLoading ? .secondary.opacity(0.5) : (screenCaptureService.isScanning ? .green : .secondary))
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : (screenCaptureService.isScanning ? Color.green.opacity(0.1) : Color(NSColor.controlBackgroundColor)))
+                                )
                         }
-                    }) {
-                        Image(systemName: screenScanner.isScanning ? "eye.fill" : "eye")
-                            .font(.system(size: 16))
-                            .foregroundColor(isLoading ? .secondary.opacity(0.5) : (screenScanner.isScanning ? .blue : .secondary))
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : (screenScanner.isScanning ? Color.blue.opacity(0.1) : Color(NSColor.controlBackgroundColor)))
-                            )
+                        .buttonStyle(.plain)
+                        .disabled(isLoading || screenCaptureService.isScanning)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(screenCaptureService.isScanning ? Color.green.opacity(0.3) : Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                        .help(isLoading ? "Please wait..." : (screenCaptureService.isScanning ? "Scanning screen..." : "Scan screen for designs"))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isLoading)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(screenScanner.isScanning ? Color.blue.opacity(0.3) : Color(NSColor.separatorColor), lineWidth: 0.5)
-                    )
-                    .help(getEyeButtonTooltip())
                     
                     // Image upload button
-                    Button(action: {
-                        if !isLoading {
-                            selectImageFile()
+                    ZStack {
+                        Button(action: {
+                            if !isLoading && selectedImage == nil {
+                                selectImageFile()
+                            }
+                        }) {
+                            Image(systemName: selectedImage != nil ? "photo.fill" : "photo")
+                                .font(.system(size: 16))
+                                .foregroundColor(isLoading ? .secondary.opacity(0.5) : (selectedImage != nil ? .blue : .secondary))
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : (selectedImage != nil ? .white : Color(NSColor.controlBackgroundColor)))
+                                )
                         }
-                    }) {
-                        Image(systemName: "photo")
-                            .font(.system(size: 16))
-                            .foregroundColor(isLoading ? .secondary.opacity(0.5) : .secondary)
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color(NSColor.controlBackgroundColor))
-                            )
+                        .buttonStyle(.plain)
+                        .disabled(isLoading)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                        .help(isLoading ? "Please wait..." : (selectedImage != nil ? "Remove image" : "Upload image"))
+                        
+                        // Red X mark overlay when image is selected
+                        if selectedImage != nil {
+                            Button(action: {
+                                if !isLoading {
+                                    selectedImage = nil
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.red)
+                                    .background(Color.white, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .offset(y: -15)
+                            .offset(x: 17)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isLoading)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-                    )
-                    .help(isLoading ? "Please wait..." : "Upload image")
+                    
                     // Text field with send button inside
                     ZStack(alignment: .trailing) {
-                        TextField(isLoading ? "Waiting for the answer..." : "Type your message...", text: $chatText)
-                            .textFieldStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .padding(.trailing, 40) // Make space for the send button
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color(NSColor.controlBackgroundColor))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-                            )
-                            .disabled(isLoading)
-                            .onSubmit {
-                                if !isLoading {
-                                    sendMessage()
+                        VStack(spacing: 8) {
+                            // Tags inside text field when image is present
+                            if selectedImage != nil {
+                                HStack(spacing: 4) {
+                                    Button("Component") {
+                                        toggleTag("Component")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(selectedTags.contains("Component") ? Color.accentColor.opacity(0.2) : Color.accentColor.opacity(0.1))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(selectedTags.contains("Component") ? Color.accentColor : Color.accentColor.opacity(0.3), lineWidth: selectedTags.contains("Component") ? 1.5 : 0.5)
+                                    )
+                                    .foregroundStyle(selectedTags.contains("Component") ? Color.accentColor : Color.accentColor.opacity(0.7))
+                                    
+                                    Button("Screen") {
+                                        toggleTag("Screen")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(selectedTags.contains("Screen") ? Color.accentColor.opacity(0.2) : Color.accentColor.opacity(0.1))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(selectedTags.contains("Screen") ? Color.accentColor : Color.accentColor.opacity(0.3), lineWidth: selectedTags.contains("Screen") ? 1.5 : 0.5)
+                                    )
+                                    .foregroundStyle(selectedTags.contains("Screen") ? Color.accentColor : Color.accentColor.opacity(0.7))
+                                    
+                                    Button("Flow") {
+                                        toggleTag("Flow")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(selectedTags.contains("Flow") ? Color.accentColor.opacity(0.2) : Color.accentColor.opacity(0.1))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(selectedTags.contains("Flow") ? Color.accentColor : Color.accentColor.opacity(0.3), lineWidth: selectedTags.contains("Flow") ? 1.5 : 0.5)
+                                    )
+                                    .foregroundStyle(selectedTags.contains("Flow") ? Color.accentColor : Color.accentColor.opacity(0.7))
+                                    
+                                    Spacer()
                                 }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
                             }
+                            
+                            // Text input
+                            TextField(placeholderText, text: $chatText)
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, selectedImage != nil ? 16 : 12)
+                                .padding(.trailing, 40) // Make space for the send button
+                                .background(Color.clear)
+                                .disabled(isLoading)
+                                .onSubmit {
+                                    if !isLoading {
+                                        sendMessage()
+                                    }
+                                }
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color(NSColor.controlBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
                         
                         // Send button inside the text field
                         Button(action: sendMessage) {
@@ -426,21 +591,17 @@ struct MenuBarView: View {
                         }
                         .buttonStyle(.borderless)
                         .padding(.trailing, 12)
+                        .padding(.bottom, selectedImage != nil ? 8 : 0)
                         .disabled((chatText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedImage == nil) || isLoading)
                     }
                 }
             }
+            }
             
         }
-        .padding(20)
+        .padding(12)
         .frame(minWidth: 380, maxWidth: .infinity)
-        .frame(minHeight: messages.isEmpty ? 100 : 600, maxHeight: .infinity)
-        .onAppear {
-            setupScreenScannerNotifications()
-        }
-        .onChange(of: screenScanner.isScanning) { isScanning in
-            isEyeSelected = isScanning
-        }
+        .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
     }
     
     private func selectImageFile() {
@@ -452,6 +613,109 @@ struct MenuBarView: View {
         
         if panel.runModal() == .OK, let url = panel.url {
             selectedImage = NSImage(contentsOf: url)
+        }
+    }
+    
+    private func openWebpage() {
+        // Opens the Chewie AI frontend interface
+        guard let url = URL(string: "https://maximegerardin97-max.github.io/chewieai-fe-clean/") else { return }
+        NSWorkspace.shared.open(url)
+    }
+    
+    private func toggleTag(_ tag: String) {
+        if selectedTags.contains(tag) {
+            selectedTags.remove(tag)
+        } else {
+            selectedTags.insert(tag)
+        }
+    }
+    
+    private func resetConversation() {
+        print("📱 [DEBUG] Reset conversation button tapped")
+        
+        // Clear all conversation data
+        messages.removeAll()
+        chatText = ""
+        selectedImage = nil
+        selectedTags.removeAll()
+        
+        // Stop any ongoing loading
+        isLoading = false
+        stopLoadingMessages()
+        
+        // Reset screen capture service if needed
+        if screenCaptureService.isScanning {
+            // Note: You might want to add a method to stop scanning in ScreenCaptureService
+            print("📱 [DEBUG] Screen capture was in progress, resetting...")
+        }
+    }
+    
+    private func scanScreen() {
+        print("📱 [DEBUG] Scan screen button tapped")
+        
+        Task {
+            print("📱 [DEBUG] Starting async screen capture task")
+            await screenCaptureService.captureAndAnalyzeScreen()
+            
+            await MainActor.run {
+                print("📱 [DEBUG] Screen capture completed, checking results")
+                print("📱 [DEBUG] Detected elements count: \(screenCaptureService.detectedElements.count)")
+                print("📱 [DEBUG] Error message: \(screenCaptureService.errorMessage ?? "none")")
+                
+                if !screenCaptureService.detectedElements.isEmpty {
+                    print("📱 [DEBUG] Showing design selection overlay")
+                    // Show design selection overlay
+                    designSelectionManager.showDesignSelection(
+                        elements: screenCaptureService.detectedElements,
+                        onElementSelected: { element in
+                            print("📱 [DEBUG] Element selected in MenuBarView: \(element.type.rawValue)")
+                            handleDesignSelection(element)
+                        },
+                        onCancel: {
+                            print("📱 [DEBUG] Design selection cancelled")
+                            // Just close the selection window, no action needed
+                        }
+                    )
+                } else if let errorMessage = screenCaptureService.errorMessage {
+                    print("📱 [DEBUG] Adding error message to chat: \(errorMessage)")
+                    messages.append(ChatMessage(text: "❌ Scan failed: \(errorMessage)", sender: .agent))
+                } else {
+                    print("📱 [DEBUG] No elements detected, adding message to chat")
+                    messages.append(ChatMessage(text: "❌ No design elements detected on screen", sender: .agent))
+                }
+            }
+        }
+    }
+    
+    private func handleDesignSelection(_ element: DetectedDesignElement) {
+        print("📱 [DEBUG] Handling design selection for element: \(element.type.rawValue)")
+        
+        // Get the cropped image of the selected design
+        print("📱 [DEBUG] Attempting to crop selected design")
+        guard let croppedImage = screenCaptureService.getImageCrop(for: element) else {
+            print("❌ [DEBUG] Failed to crop selected design")
+            messages.append(ChatMessage(text: "❌ Failed to capture selected design", sender: .agent))
+            return
+        }
+        
+        print("✅ [DEBUG] Design cropped successfully, size: \(croppedImage.size)")
+        
+        // Create a message describing the selected design
+        let designDescription = "📷 Selected Design: \(element.type.rawValue) (confidence: \(Int(element.confidence * 100))%)"
+        
+        print("📱 [DEBUG] Adding design description to chat: \(designDescription)")
+        
+        // Add to messages
+        messages.append(ChatMessage(text: designDescription, image: croppedImage, sender: .user))
+        
+        // Set the selected image for the chat input
+        selectedImage = croppedImage
+        print("📱 [DEBUG] Selected image set for chat input")
+        
+        // Auto-focus the text field for user input
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            print("📱 [DEBUG] Auto-focus delay completed")
+            // This will be handled by the text field automatically
         }
     }
     
@@ -469,43 +733,35 @@ Most impactful improvement :
 ✅ Solution 1 : Focus on improving the user onboarding flow to reduce drop-off rates
 ✅ Solution 2 : Implement better error handling and user feedback mechanisms
 """
-        messages.append(sampleOutput)
-    }
-    
-    private func showScannerInfo() {
-        let infoMessage = """
-        🔍 Screen Scanner Status:
-        \(screenScanner.getPerformanceInfo())
-        
-        Permission: \(screenScanner.hasPermission ? "✅ Granted" : "❌ Required")
-        Scanning: \(screenScanner.isScanning ? "✅ Active" : "⏸️ Stopped")
-        Elements Detected: \(screenScanner.detectedElements.count)
-        """
-        
-        messages.append(infoMessage)
+        messages.append(ChatMessage(text: sampleOutput, sender: .agent))
     }
     
     private func sendTaggedMessage(_ content: String) {
         let taggedMessage = "\(content)\n\nTell me more about this"
         
         // Add user message to chat
-        messages.append(taggedMessage)
+        messages.append(ChatMessage(text: taggedMessage, sender: .user))
         
         // Send to AI
         isLoading = true
+        startLoadingMessages()
         
         Task {
             do {
                 let response = try await dustService.sendMessage(taggedMessage, image: nil)
                 
                 await MainActor.run {
-                    messages.append(response)
+                    let responseMessage = ChatMessage(text: response, sender: .agent)
+                    messages.append(responseMessage)
                     isLoading = false
+                    stopLoadingMessages()
                 }
             } catch {
                 await MainActor.run {
-                    messages.append("Error: \(error.localizedDescription)")
+                    let errorMessage = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
+                    messages.append(errorMessage)
                     isLoading = false
+                    stopLoadingMessages()
                 }
             }
         }
@@ -517,311 +773,54 @@ Most impactful improvement :
         // Don't send if both text and image are empty
         guard !trimmedText.isEmpty || selectedImage != nil else { return }
         
-        // Add user message to chat
+        // Build the message with selected tags
         var messageText = trimmedText.isEmpty ? "" : trimmedText
-        if selectedImage != nil {
-            messageText += trimmedText.isEmpty ? "📷 Image" : " [📷 Image attached]"
+        
+        // Add selected tags to the message
+        if !selectedTags.isEmpty {
+            let tagsText = "Tags: " + selectedTags.sorted().joined(separator: ", ")
+            if messageText.isEmpty {
+                messageText = tagsText
+            } else {
+                messageText = "\(messageText)\n\n\(tagsText)"
+            }
         }
         
-        if !messageText.isEmpty {
-            messages.append(messageText)
-        }
+        // Add user message to chat
+        let message = ChatMessage(text: messageText, image: selectedImage, sender: .user)
+        messages.append(message)
         
-        // Clear input
+        // Clear input and reset tags
         chatText = ""
         let imageToSend = selectedImage
         selectedImage = nil
+        selectedTags.removeAll()
         
         // Send to AI
         isLoading = true
+        startLoadingMessages()
         
         Task {
             do {
                 let response = try await dustService.sendMessage(
-                    trimmedText.isEmpty ? "Please analyze this image." : trimmedText,
+                    messageText.isEmpty ? "Please analyze this image." : messageText,
                     image: imageToSend
                 )
                 
                 await MainActor.run {
-                    messages.append(response)
+                    let responseMessage = ChatMessage(text: response, sender: .agent)
+                    messages.append(responseMessage)
                     isLoading = false
+                    stopLoadingMessages()
                 }
             } catch {
                 await MainActor.run {
-                    messages.append("Error: \(error.localizedDescription)")
+                    let errorMessage = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
+                    messages.append(errorMessage)
                     isLoading = false
+                    stopLoadingMessages()
                 }
             }
         }
-    }
-    
-    // MARK: - Screen Scanner Integration
-    
-    private func handleEyeButtonTap() {
-        if !screenScanner.hasPermission {
-            screenScanner.requestPermissions()
-        } else {
-            screenScanner.toggleScanning()
-        }
-    }
-    
-    private func getEyeButtonTooltip() -> String {
-        if isLoading {
-            return "Please wait..."
-        } else if !screenScanner.hasPermission {
-            return "Screen recording permission required"
-        } else if screenScanner.isScanning {
-            return "Stop screen scanning"
-        } else {
-            return "Start screen scanning"
-        }
-    }
-    
-    private func setupScreenScannerNotifications() {
-        // Listen for element selection from screen scanner
-        NotificationCenter.default.addObserver(
-            forName: .elementSelectedForAnalysis,
-            object: nil,
-            queue: .main
-        ) { notification in
-            self.handleElementSelectedForAnalysis(notification)
-        }
-        
-        // Listen for scanner errors
-        NotificationCenter.default.addObserver(
-            forName: .scannerError,
-            object: nil,
-            queue: .main
-        ) { notification in
-            self.handleScannerError(notification)
-        }
-    }
-    
-    private func handleScannerError(_ notification: Notification) {
-        guard let errorMessage = notification.userInfo?["error"] as? String else { return }
-        
-        // Add error message to chat
-        let errorChatMessage = "🚨 Scanner Error: \(errorMessage)"
-        messages.append(errorChatMessage)
-        
-        // Stop scanning on error
-        screenScanner.stopScanning()
-    }
-    
-    private func handleElementSelectedForAnalysis(_ notification: Notification) {
-        guard let element = notification.userInfo?["element"] as? UIElement else { return }
-        
-        // Create a message about the selected element
-        let elementMessage = """
-        📱 Detected UI Element:
-        Type: \(element.type.rawValue)
-        Description: \(element.description)
-        Confidence: \(String(format: "%.1f", element.confidence * 100))%
-        
-        Please analyze this UI element and provide design feedback.
-        """
-        
-        // Add to messages
-        messages.append(elementMessage)
-        
-        // Send to AI for analysis
-        isLoading = true
-        
-        Task {
-            do {
-                let response = try await dustService.sendMessage(elementMessage, image: nil)
-                
-                await MainActor.run {
-                    messages.append(response)
-                    isLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    messages.append("Error analyzing element: \(error.localizedDescription)")
-                    isLoading = false
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Debug Panel View
-struct DebugPanelView: View {
-    @ObservedObject var screenScanner: ScreenScanner
-    @State private var refreshTimer: Timer?
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("🔍 Debug Panel")
-                    .font(.headline)
-                    .foregroundStyle(Color.primary)
-                Spacer()
-                Text("Live Updates")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
-            }
-            
-            // Permission Status
-            HStack {
-                Text("Permission:")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
-                Text(screenScanner.hasPermission ? "✅ Granted" : "❌ Required")
-                    .font(.caption)
-                    .foregroundStyle(screenScanner.hasPermission ? Color.green : Color.red)
-                Spacer()
-            }
-            
-            // Scanning Status
-            HStack {
-                Text("Scanning:")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
-                Text(screenScanner.isScanning ? "✅ Active" : "⏸️ Stopped")
-                    .font(.caption)
-                    .foregroundStyle(screenScanner.isScanning ? Color.green : Color.gray)
-                Spacer()
-            }
-            
-            // Performance Metrics
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Performance:")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
-                
-                HStack {
-                    Text("Elements Detected:")
-                        .font(.caption2)
-                        .foregroundStyle(Color.secondary)
-                    Text("\(screenScanner.detectedElements.count)")
-                        .font(.caption2)
-                        .foregroundStyle(Color.primary)
-                        .fontWeight(.medium)
-                    Spacer()
-                }
-                
-                HStack {
-                    Text("Scan Count:")
-                        .font(.caption2)
-                        .foregroundStyle(Color.secondary)
-                    Text("\(screenScanner.scanCount)")
-                        .font(.caption2)
-                        .foregroundStyle(Color.primary)
-                        .fontWeight(.medium)
-                    Spacer()
-                }
-                
-                if let lastScan = screenScanner.lastScanTime {
-                    HStack {
-                        Text("Last Scan:")
-                            .font(.caption2)
-                            .foregroundStyle(Color.secondary)
-                        Text(lastScan, style: .time)
-                            .font(.caption2)
-                            .foregroundStyle(Color.primary)
-                            .fontWeight(.medium)
-                        Spacer()
-                    }
-                }
-            }
-            
-            // Detected Elements List
-            if !screenScanner.detectedElements.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Detected Elements:")
-                        .font(.caption)
-                        .foregroundStyle(Color.secondary)
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(screenScanner.detectedElements, id: \.id) { element in
-                                ElementDebugView(element: element)
-                            }
-                        }
-                        .padding(.horizontal, 4)
-                    }
-                    .frame(maxHeight: 60)
-                }
-            }
-            
-            // Design Detection Service Status
-            if screenScanner.designDetectionService.isProcessing {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Processing detection...")
-                        .font(.caption)
-                        .foregroundStyle(Color.secondary)
-                    Spacer()
-                }
-            }
-            
-            // Performance Info
-            Text(screenScanner.getPerformanceInfo())
-                .font(.caption2)
-                .foregroundStyle(Color.secondary)
-                .padding(.top, 4)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(NSColor.controlBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                )
-        )
-        .onAppear {
-            startRefreshTimer()
-        }
-        .onDisappear {
-            stopRefreshTimer()
-        }
-    }
-    
-    private func startRefreshTimer() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            // This will trigger a view refresh by accessing the observed properties
-        }
-    }
-    
-    private func stopRefreshTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-}
-
-// MARK: - Element Debug View
-struct ElementDebugView: View {
-    let element: UIElement
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(element.type.rawValue)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(element.type.color)
-            
-            if let text = element.text, !text.isEmpty {
-                Text(text.prefix(20) + (text.count > 20 ? "..." : ""))
-                    .font(.caption2)
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(1)
-            }
-            
-            Text("\(String(format: "%.0f", element.confidence * 100))%")
-                .font(.caption2)
-                .foregroundStyle(Color.secondary)
-        }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(element.type.color.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(element.type.color.opacity(0.3), lineWidth: 1)
-                )
-        )
     }
 }
