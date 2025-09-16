@@ -248,14 +248,14 @@ struct AgentOutputView: View {
                     // Arguments content (collapsible)
                     if isArgumentsExpanded {
                         VStack(alignment: .leading, spacing: 8) {
-            ForEach(output.categories.indices, id: \.self) { categoryIndex in
-                let category = output.categories[categoryIndex]
-                    
-                    ForEach(category.arguments.indices, id: \.self) { argumentIndex in
-                        ArgumentCard(argument: category.arguments[argumentIndex])
-                    }
-                }
-            }
+                            ForEach(output.categories.indices, id: \.self) { categoryIndex in
+                                let category = output.categories[categoryIndex]
+                                
+                                ForEach(category.arguments.indices, id: \.self) { argumentIndex in
+                                    ArgumentCard(argument: category.arguments[argumentIndex])
+                                }
+                            }
+                        }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
                         .transition(.asymmetric(
