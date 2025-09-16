@@ -197,7 +197,6 @@ struct ArgumentCard: View {
 struct AgentOutputView: View {
     let output: AgentOutput
     let onSolutionMoreTapped: (String) -> Void
-    @Binding var isArgumentsExpanded: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -210,68 +209,19 @@ struct AgentOutputView: View {
                         }
                     }
                 }
-                
-                // Separator under solutions
-                Rectangle()
-                    .fill(Color(NSColor.separatorColor))
-                    .frame(height: 1)
-                    .padding(.vertical, 8)
             }
             
-            // Arguments in a dedicated card
-            if !output.categories.isEmpty && output.categories.contains(where: { !$0.arguments.isEmpty }) {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Arguments card header with toggle button
-                    Button(action: {
-                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0)) {
-                            isArgumentsExpanded.toggle()
-                        }
-                    }) {
-                        HStack {
-                            Text("Arguments")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                            
-                            Image(systemName: isArgumentsExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .rotationEffect(.degrees(isArgumentsExpanded ? 0 : 0))
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0), value: isArgumentsExpanded)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 16)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    // Arguments content (collapsible)
-                    if isArgumentsExpanded {
-                        VStack(alignment: .leading, spacing: 8) {
+            // Then categories with their arguments
             ForEach(output.categories.indices, id: \.self) { categoryIndex in
                 let category = output.categories[categoryIndex]
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    CategoryTitle(title: category.title)
                     
                     ForEach(category.arguments.indices, id: \.self) { argumentIndex in
                         ArgumentCard(argument: category.arguments[argumentIndex])
                     }
                 }
-            }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.95)),
-                            removal: .opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.95))
-                        ))
-                    }
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                        )
-                )
             }
         }
     }
@@ -294,7 +244,7 @@ struct MenuBarView: View {
     @State private var descriptionText: String = ""
     @State private var isCapturingScreenshot: Bool = false
     @State private var screenshotTimeoutTimer: Timer?
-    @State private var isArgumentsExpanded: Bool = false
+    @State private var expandedImageIds: Set<UUID> = []
     
     // Loading messages to cycle through
     private let loadingMessages = [
@@ -351,46 +301,52 @@ struct MenuBarView: View {
     
     var body: some View {
         VStack(spacing: 16) {
-            // Header section
-            HStack {
-                // Left side: Back chevron + Title
-                HStack(spacing: 8) {
-                    Button(action: {
-                        // Back action - could be used to close or navigate back
-                        print("📱 [DEBUG] Back button tapped")
-                    }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Text("Fits profiles")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.primary)
-                }
-                
-                Spacer()
-                
-                // Right side: Reset button
+            headerSection
+            conversationArea
+            chatInputSection
+        }
+        .frame(minWidth: 380, maxWidth: .infinity)
+        .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
+    }
+    
+    // MARK: - Header Section
+    private var headerSection: some View {
+        HStack {
+            // Left side: Back chevron + Title
+            HStack(spacing: 8) {
                 Button(action: {
-                    resetConversation()
+                    // Back action - could be used to close or navigate back
                 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .regular))
-                        Text("Reset")
-                            .font(.system(size: 14, weight: .regular))
-                    }
-                    .foregroundColor(.secondary)
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
+                
+                Text("Fits profiles")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 0)
             
-            // Main content
-        VStack(spacing: 16) {
+            Spacer()
+            
+            // Right side: Reset button
+            Button(action: {
+                resetConversation()
+            }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Conversation Area
+    private var conversationArea: some View {
             // Messages area - animated pop-in above input
             if !messages.isEmpty {
                 ScrollViewReader { proxy in
@@ -403,43 +359,74 @@ struct MenuBarView: View {
                                 if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
                                     // Parse and display as structured cards
                                     let output = AgentOutputParser.parse(message.text)
-                                    AgentOutputView(
-                                        output: output,
-                                        onSolutionMoreTapped: { solution in
+                                    AgentOutputView(output: output) { solution in
                                         sendTaggedMessage(solution)
-                                        },
-                                        isArgumentsExpanded: $isArgumentsExpanded
-                                    )
+                                    }
                                     .padding(.horizontal, 8)
                                     .id("message-\(index)")
                                 } else {
                                     // Display as regular message with optional image
                                     VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 8) {
                                         if let image = message.image {
-                                            // Display image
-                                            HStack {
-                                                if message.sender == .user {
-                                                    Spacer()
-                                                }
-                                                
-                                                GeometryReader { geometry in
+                                            // Display image with expand functionality
+                                            VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 8) {
+                                                HStack {
+                                                    if message.sender == .user {
+                                                        Spacer()
+                                                    }
+                                                    
+                                                    let isExpanded = expandedImageIds.contains(message.id)
+                                                    
                                             Image(nsImage: image)
                                                 .resizable()
-                                                        .scaledToFit()
-                                                        .frame(width: geometry.size.width, height: geometry.size.height)
+                                                .aspectRatio(contentMode: .fit)
+                                                        .frame(
+                                                            maxHeight: isExpanded ? 500 : 300,
+                                                            maxWidth: isExpanded ? .infinity : 300
+                                                        )
                                                         .background(
-                                                            message.sender == .user
-                                                            ? Color.accentColor.opacity(0.8)
-                                                            : Color.accentColor.opacity(0.15),
+                                                            message.sender == .user 
+                                                            ? Color.accentColor.opacity(0.8) 
+                                                            : Color.accentColor.opacity(0.15), 
                                                             in: RoundedRectangle(cornerRadius: 16)
                                                         )
                                                         .clipShape(RoundedRectangle(cornerRadius: 16))
                                                 .shadow(radius: 4)
-                                                }
-                                                .frame(maxWidth: 450, maxHeight: 450)
-                                                
+                                                        .animation(.easeInOut(duration: 0.3), value: isExpanded)
+                                                    
+                                                    if message.sender == .agent {
+                                                        Spacer()
+                                                    }
+                                        }
+                                        
+                                                // Expand/Collapse button
+                                            HStack {
+                                                    if message.sender == .user {
+                                                        Spacer()
+                                                    }
+                                                    
+                                                    Button(action: {
+                                                        if expandedImageIds.contains(message.id) {
+                                                            expandedImageIds.remove(message.id)
+                                                        } else {
+                                                            expandedImageIds.insert(message.id)
+                                                        }
+                                                    }) {
+                                                        Image(systemName: expandedImageIds.contains(message.id) ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                                                            .font(.system(size: 12))
+                                                            .foregroundColor(.secondary)
+                                                            .padding(6)
+                                                            .background(
+                                                                RoundedRectangle(cornerRadius: 8)
+                                                                    .fill(Color(NSColor.controlBackgroundColor))
+                                                            )
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .help(expandedImageIds.contains(message.id) ? "Collapse image" : "Expand image")
+                                                    
                                                 if message.sender == .agent {
-                                                    Spacer()
+                                                        Spacer()
+                                                    }
                                                 }
                                             }
                                         }
@@ -1014,8 +1001,8 @@ struct MenuBarView: View {
         screenshotTimeoutTimer?.invalidate()
         screenshotTimeoutTimer = nil
         
-        // Reset arguments expanded state
-        isArgumentsExpanded = false
+        // Reset expanded images
+        expandedImageIds.removeAll()
         
         // Stop any ongoing loading
         isLoading = false
