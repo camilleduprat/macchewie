@@ -194,6 +194,63 @@ struct ArgumentCard: View {
     }
 }
 
+// MARK: - Confidence Tag Component
+struct ConfidenceTag: View {
+    let confidenceLevel: ConfidenceLevel
+    
+    enum ConfidenceLevel {
+        case high
+        case medium
+        case low
+        
+        var text: String {
+            switch self {
+            case .high: return "High Confidence"
+            case .medium: return "Medium Confidence"
+            case .low: return "Low Confidence"
+            }
+        }
+        
+        var iconName: String {
+            switch self {
+            case .high: return "checkmark.circle.fill"
+            case .medium: return "clock.fill"
+            case .low: return "exclamationmark.triangle.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .high: return .green
+            case .medium: return .yellow
+            case .low: return .red
+            }
+        }
+    }
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: confidenceLevel.iconName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(confidenceLevel.color)
+            
+            Text(confidenceLevel.text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.primary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                )
+        )
+    }
+}
+
 struct AgentOutputView: View {
     let output: AgentOutput
     let onSolutionMoreTapped: (String) -> Void
@@ -248,14 +305,14 @@ struct AgentOutputView: View {
                     // Arguments content (collapsible)
                     if isArgumentsExpanded {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(output.categories.indices, id: \.self) { categoryIndex in
-                                let category = output.categories[categoryIndex]
-                                
-                                ForEach(category.arguments.indices, id: \.self) { argumentIndex in
-                                    ArgumentCard(argument: category.arguments[argumentIndex])
-                                }
-                            }
-                        }
+            ForEach(output.categories.indices, id: \.self) { categoryIndex in
+                let category = output.categories[categoryIndex]
+                    
+                    ForEach(category.arguments.indices, id: \.self) { argumentIndex in
+                        ArgumentCard(argument: category.arguments[argumentIndex])
+                    }
+                }
+            }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
                         .transition(.asymmetric(
@@ -272,6 +329,13 @@ struct AgentOutputView: View {
                                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
                         )
                 )
+                
+                // Confidence tag under arguments
+                HStack {
+                    ConfidenceTag(confidenceLevel: .medium)
+                    Spacer()
+                }
+                .padding(.top, 8)
             }
         }
     }
@@ -286,6 +350,11 @@ struct MenuBarView: View {
     @State private var loadingMessageIndex: Int = 0
     @State private var loadingTimer: Timer?
     @State private var selectedTags: Set<String> = []
+    @State private var isAppButtonHovered: Bool = false
+    @State private var isResetButtonHovered: Bool = false
+    @State private var isScreenshotButtonHovered: Bool = false
+    @State private var isUploadButtonHovered: Bool = false
+    @State private var isSendButtonHovered: Bool = false
     
     // Multi-step flow state
     @State private var currentStep: Int = 1
@@ -351,135 +420,122 @@ struct MenuBarView: View {
     
     var body: some View {
         VStack(spacing: 16) {
-            // Header section
-            HStack {
-                // Left side: Back chevron + Title
-                HStack(spacing: 8) {
-                    Button(action: {
-                        // Back action - could be used to close or navigate back
-                        print("📱 [DEBUG] Back button tapped")
-                    }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Text("Fits profiles")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.primary)
-                }
-                
-                Spacer()
-                
-                // Right side: Reset button
+            headerSection
+            mainContent
+        }
+        .padding(12)
+        .frame(minWidth: 380, maxWidth: .infinity)
+        .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
+        .background(Color.clear) // Ensure transparent background for glass effect
+    }
+    
+    // MARK: - Header Section
+    private var headerSection: some View {
+        HStack {
+            Spacer()
+            
+            // Right side: Both buttons with 8px spacing
+            HStack(spacing: 0) {
+                // Reset button
                 Button(action: {
                     resetConversation()
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .regular))
-                        Text("Reset")
-                            .font(.system(size: 14, weight: .regular))
+                        
+                        if isResetButtonHovered {
+                            Text("Reset")
+                                .font(.system(size: 14, weight: .regular))
+                                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        }
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.primary.opacity(0.5))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 80)
+                            .fill(isResetButtonHovered ? Color.clear : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 80)
+                            .stroke(isResetButtonHovered ? Color.white.opacity(0.2) : Color.clear, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
+                .onHover { isHovering in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isResetButtonHovered = isHovering
+                    }
+                }
+                
+                // App button
+                Button(action: {
+                    // Open ChewieAI website
+                    if let url = URL(string: "https://maximegerardin97-max.github.io/chewieai-fe-clean/") {
+                        NSWorkspace.shared.open(url)
+                    }
+                    print("📱 [DEBUG] App button tapped - opening ChewieAI website")
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.forward")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.primary.opacity(0.5))
+                        
+                        if isAppButtonHovered {
+                            Text("App")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(.primary.opacity(0.5))
+                                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 80)
+                            .fill(isAppButtonHovered ? Color.clear : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 80)
+                            .stroke(isAppButtonHovered ? Color.white.opacity(0.2) : Color.clear, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .onHover { isHovering in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isAppButtonHovered = isHovering
+                    }
+                }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 0)
-            
-            // Main content
+        }
+        .padding(.horizontal, 0)
+        .padding(.vertical, 0)
+        .frame(height: 36) // Fixed height to prevent layout shift on hover
+    }
+    
+    // MARK: - Main Content
+    private var mainContent: some View {
         VStack(spacing: 16) {
-            // Messages area - animated pop-in above input
+            messagesArea
+            chatInputSection
+        }
+    }
+    
+    // MARK: - Messages Area
+    private var messagesArea: some View {
+        Group {
             if !messages.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 24) {
                             ForEach(messages.indices, id: \.self) { index in
-                                let message = messages[index]
-                                
-                                // Check if this message contains agent output format
-                                if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
-                                    // Parse and display as structured cards
-                                    let output = AgentOutputParser.parse(message.text)
-                                    AgentOutputView(
-                                        output: output,
-                                        onSolutionMoreTapped: { solution in
-                                        sendTaggedMessage(solution)
-                                        },
-                                        isArgumentsExpanded: $isArgumentsExpanded
-                                    )
-                                    .padding(.horizontal, 8)
-                                    .id("message-\(index)")
-                                } else {
-                                    // Display as regular message with optional image
-                                    VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 8) {
-                                        if let image = message.image {
-                                            // Display image
-                                            HStack {
-                                                if message.sender == .user {
-                                                    Spacer()
-                                                }
-                                                
-                                                GeometryReader { geometry in
-                                            Image(nsImage: image)
-                                                .resizable()
-                                                        .scaledToFit()
-                                                        .frame(width: geometry.size.width, height: geometry.size.height)
-                                                        .background(
-                                                            message.sender == .user
-                                                            ? Color.accentColor.opacity(0.8)
-                                                            : Color.accentColor.opacity(0.15),
-                                                            in: RoundedRectangle(cornerRadius: 16)
-                                                        )
-                                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                                .shadow(radius: 4)
-                                                }
-                                                .frame(maxWidth: 450, maxHeight: 450)
-                                                
-                                                if message.sender == .agent {
-                                                    Spacer()
-                                                }
-                                            }
-                                        }
-                                        
-                                        if !message.text.isEmpty {
-                                            HStack {
-                                                if message.sender == .user {
-                                                    Spacer()
-                                                }
-                                                
-                                                Text(message.text)
-                                                    .padding(.horizontal, 16)
-                                                    .padding(.vertical, 16)
-                                                    .background(
-                                                        message.sender == .user 
-                                                        ? Color.accentColor.opacity(0.8) 
-                                                        : Color.accentColor.opacity(0.15), 
-                                                        in: RoundedRectangle(cornerRadius: 16)
-                                                    )
-                                                    .foregroundStyle(
-                                                        message.sender == .user 
-                                                        ? Color.white 
-                                                        : Color.primary
-                                                    )
-                                                    .frame(maxWidth: 300, alignment: message.sender == .user ? .trailing : .leading)
-                                                
-                                                if message.sender == .agent {
-                                                    Spacer()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .id("message-\(index)")
-                                }
+                                messageView(for: messages[index], at: index)
                             }
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
                     }
-                    .onChange(of: messages.count) { _ in
+                    .onChange(of: messages.count) {
                         // Scroll to the latest message when new messages are added
                         withAnimation(.easeInOut(duration: 0.3)) {
                             proxy.scrollTo("message-\(messages.count - 1)", anchor: .bottom)
@@ -487,386 +543,511 @@ struct MenuBarView: View {
                     }
                 }
             }
+        }
+    }
+    
+    // MARK: - Individual Message View
+    private func messageView(for message: ChatMessage, at index: Int) -> some View {
+        Group {
+            // Check if this message contains agent output format
+            if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
+                // Parse and display as structured cards
+                let output = AgentOutputParser.parse(message.text)
+                AgentOutputView(
+                    output: output,
+                    onSolutionMoreTapped: { solution in
+                        sendTaggedMessage(solution)
+                    },
+                    isArgumentsExpanded: $isArgumentsExpanded
+                )
+                .padding(.horizontal, 8)
+                .id("message-\(index)")
+            } else {
+                // Display as regular message with optional image
+                regularMessageView(for: message, at: index)
+            }
+        }
+    }
+    
+    // MARK: - Regular Message View
+    private func regularMessageView(for message: ChatMessage, at index: Int) -> some View {
+        VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 12) {
+            if let image = message.image {
+                messageImageView(image: image, sender: message.sender)
+            }
             
-            
-            // Chat input - always at bottom
-            VStack(spacing: 0) {
-                
-                
-                HStack(spacing: 8) {
-                    // Screen scan button - only show when no image is uploaded
-                    if selectedImage == nil {
-                    Button(action: {
-                            if !isLoading && !isCapturingScreenshot {
-                                captureScreenshot()
-                        }
-                    }) {
-                        Image(systemName: isCapturingScreenshot ? "camera.fill" : "camera.viewfinder")
-                            .font(.system(size: 16))
-                            .foregroundColor(isLoading ? .secondary.opacity(0.5) : (isCapturingScreenshot ? .green : .secondary))
-                            .frame(width: 44, height: 44)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : (isCapturingScreenshot ? Color.green.opacity(0.1) : Color(NSColor.controlBackgroundColor)))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                        .disabled(isLoading || isCapturingScreenshot)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                                .stroke(isCapturingScreenshot ? Color.green.opacity(0.3) : Color(NSColor.separatorColor), lineWidth: 0.5)
-                    )
-                        .help(isLoading ? "Please wait..." : (isCapturingScreenshot ? "Capturing screenshot..." : "Take screenshot of your design"))
-                    }
-                    
-                    // Image upload button
-                    ZStack {
-                        Button(action: {
-                            if !isLoading && selectedImage == nil {
-                                selectImageFile()
-                            }
-                        }) {
-                            Image(systemName: selectedImage != nil ? "photo.fill" : "photo")
-                                .font(.system(size: 16))
-                                .foregroundColor(isLoading ? .secondary.opacity(0.5) : (selectedImage != nil ? .blue : .secondary))
-                                .frame(width: 44, height: 44)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : (selectedImage != nil ? .white : Color(NSColor.controlBackgroundColor)))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isLoading)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-                        )
-                        .help(isLoading ? "Please wait..." : (selectedImage != nil ? "Remove image" : "Upload image"))
-                        
-                        // Red X mark overlay when image is selected
-                        if selectedImage != nil {
-                            Button(action: {
-                                if !isLoading {
-                                    selectedImage = nil
-                                }
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.red)
-                                    .background(Color.white, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .offset(y: -15)
-                            .offset(x: 17)
-                        }
-                    }
-                    
-                    // Text field with send button inside
-                    ZStack(alignment: .trailing) {
-                        VStack(spacing: 0) {
-                            // Text input - only when no image (step 3 has its own text input)
-                            if selectedImage == nil {
-                        TextField(placeholderText, text: $chatText)
-                            .textFieldStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .padding(.trailing, 40) // Make space for the send button
-                                    .frame(height: 44)
-                                    .background(Color.clear)
-                                    .disabled(isLoading)
-                                    .onSubmit {
-                                        if !isLoading {
-                                            sendMessage()
-                                        }
-                                    }
-                            }
-                            
-                            // Multi-step flow when image is present
-                            if selectedImage != nil {
-                                VStack(spacing: 0) {
-                                    // Step content
-                                    switch currentStep {
-                                    case 1:
-                                        // Step 1: Input type selection - no back button
-                                        VStack(spacing: 12) {
-                                            // Step title
-                                            HStack {
-                                                Text("Image type?")
-                                                    .font(.system(size: 14, weight: .regular))
-                                                    .foregroundColor(.primary .opacity(0.5))
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 16)
-                                            
-                                            // Tags
-                                            HStack(spacing: 4) {
-                                                Button("Component") {
-                                                    selectedInputType = "Component"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                            .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedInputType == "Component" ? Color.white : Color.white.opacity(0.1))
-                            )
-                            .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedInputType == "Component" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedInputType == "Component" ? Color.blue : Color.white.opacity(0.5))
-                                                
-                                                Button("Screen") {
-                                                    selectedInputType = "Screen"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedInputType == "Screen" ? Color.white : Color.white.opacity(0.1))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedInputType == "Screen" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedInputType == "Screen" ? Color.blue : Color.white.opacity(0.5))
-                                                
-                                                Button("Flow") {
-                                                    selectedInputType = "Flow"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedInputType == "Flow" ? Color.white : Color.white.opacity(0.1))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedInputType == "Flow" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedInputType == "Flow" ? Color.blue : Color.white.opacity(0.5))
-                                                
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.bottom, 16)
-                                        }
-                                        
-                                    case 2:
-                                        // Step 2: Product type selection - with back button
-                                        VStack(spacing: 12) {
-                                            // Step title with back button
-                                            HStack {
-                                                Button(action: {
-                                                    currentStep = 1
-                                                }) {
-                                                    Image(systemName: "chevron.left")
-                                                        .font(.system(size: 14, weight: .regular))
-                                                        .foregroundColor(.primary .opacity(0.5))
-                                                }
-                                                .buttonStyle(.plain)
-                                                
-                                                Text("Product type?")
-                                                    .font(.system(size: 14, weight: .regular))
-                                                    .foregroundColor(.primary .opacity(0.5))
-                                                
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 16)
-                                            
-                                            // Tags
-            HStack(spacing: 4) {
-                                                Button("SaaS") {
-                                                    selectedProductType = "SaaS"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedProductType == "SaaS" ? Color.white : Color.white.opacity(0.1))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedProductType == "SaaS" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedProductType == "SaaS" ? Color.blue : Color.white.opacity(0.5))
-                
-                                                Button("Mobile") {
-                                                    selectedProductType = "Mobile"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedProductType == "Mobile" ? Color.white : Color.white.opacity(0.1))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedProductType == "Mobile" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedProductType == "Mobile" ? Color.blue : Color.white.opacity(0.5))
-                                                
-                                                Button("Ecommerce") {
-                                                    selectedProductType = "Ecommerce"
-                                                }
-                                                .buttonStyle(.plain)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .fill(selectedProductType == "Ecommerce" ? Color.white : Color.white.opacity(0.1))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 80)
-                                                        .stroke(selectedProductType == "Ecommerce" ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .foregroundStyle(selectedProductType == "Ecommerce" ? Color.blue : Color.white.opacity(0.5))
-                                                
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.bottom, 16)
-                                        }
-                                        
-                                    case 3:
-                                        // Step 3: Description - with back button and text input
-                                        VStack(spacing: 12) {
-                                            // Step title with back button
-                                            HStack {
-                                                Button(action: {
-                                                    currentStep = 2
-                                                }) {
-                                                    Image(systemName: "chevron.left")
-                                                        .font(.system(size: 14, weight: .regular))
-                                                        .foregroundColor(.primary .opacity(0.5))
-                                                }
-                                                .buttonStyle(.plain)
-                                                
-                                                Text("Additional context?")
-                                                    .font(.system(size: 14, weight: .regular))
-                                                    .foregroundColor(.primary .opacity(0.5))
-                                                
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 16)
-                                            
-                                            // Text input for step 3 with send button
-                                            ZStack(alignment: .trailing) {
-                                                TextField(placeholderText, text: $descriptionText)
-                                                    .textFieldStyle(.plain)
-                                                    .padding(.horizontal, 16)
-                                                    .padding(.vertical, 12)
-                                                    .padding(.trailing, 40) // Make space for the send button
-                                                    .background(Color.clear)
-                            .disabled(isLoading)
-                            .onSubmit {
-                                if !isLoading {
-                                                            handleStepAction()
-                                                        }
-                                                    }
-                                                
-                                                
-                                                // Send button for step 3
-                                                Button(action: {
-                                                    handleStepAction()
-                                                }) {
-                            if isLoading {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            } else {
-                                                        Image(systemName: "arrow.up.circle.fill")
-                                                            .font(.system(size: 16, weight: .regular))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                                                .disabled(isButtonDisabled())
-                        .padding(.trailing, 12)
-                                            }
-                                        }
-                                        
-                                    default:
-                                        EmptyView()
-                                    }
-                                    
-                                    // Progress bar at bottom
-                                    GeometryReader { geometry in
-                                        ZStack(alignment: .leading) {
-                                            // Background bar
-                                            Rectangle()
-                                                .fill(Color.secondary.opacity(0.3))
-                                                .frame(height: 1)
-                                            
-                                            // Progress bar
-                                            Rectangle()
-                                                .fill(Color.white)
-                                                .frame(width: geometry.size.width * getProgressPercentage(), height: 1)
-                                        }
-                                    }
-                                    .frame(height: 1)
-                                    .padding(.horizontal, 20)
-                                }
-                            }
-                        }
+            if !message.text.isEmpty {
+                messageTextView(text: message.text, sender: message.sender)
+            }
+        }
+        .id("message-\(index)")
+        .padding(.vertical, 4)
+    }
+    
+    // MARK: - Message Image View
+    private func messageImageView(image: NSImage, sender: MessageSender) -> some View {
+        VStack(alignment: sender == .user ? .trailing : .leading, spacing: 8) {
+            // Image container with enhanced styling
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 320, maxHeight: 240)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                                    .fill(isLoading ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color(NSColor.controlBackgroundColor))
+                        .fill(.regularMaterial)
+                        .opacity(0.8)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+            
+            // Optional: Add a subtle caption or timestamp
+            if sender == .user {
+                Text("Image")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 4)
+            }
+        }
+    }
+    
+    // MARK: - Message Text View
+    private func messageTextView(text: String, sender: MessageSender) -> some View {
+        HStack {
+            if sender == .user {
+                Spacer()
+            }
+            
+            Text(text)
+                .font(.system(size: 14, weight: .regular))
+                .lineLimit(nil)
+                .multilineTextAlignment(sender == .user ? .trailing : .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(sender == .user 
+                            ? Color.blue.opacity(0.9) 
+                            : Color(NSColor.controlBackgroundColor).opacity(0.8))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        .stroke(sender == .user 
+                            ? Color.blue.opacity(0.3) 
+                            : .white.opacity(0.2), lineWidth: 1)
                 )
-                        
-                        // Send button - only show when no image (step 3 has its own send button)
-                        if selectedImage == nil {
-                            Button(action: {
-                                sendMessage()
-                            }) {
-                                if isLoading {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                } else {
-                                    // Show send icon for no image
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.system(size: 14, weight: .regular))
-                                        .foregroundColor(.white)
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(isButtonDisabled())
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 0)
-                        }
-                        
-                        // Next button for steps 1 and 2 - positioned on the right side
-                        if selectedImage != nil && currentStep < 3 {
-                            Button(action: {
-                                handleStepAction()
-                            }) {
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundColor(Color.white.opacity(0.5))
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(isButtonDisabled())
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 8)
-                        }
+                .foregroundStyle(
+                    sender == .user 
+                    ? Color.white 
+                    : Color.primary
+                )
+                .frame(maxWidth: 320, alignment: sender == .user ? .trailing : .leading)
+                .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+            
+            if sender == .agent {
+                Spacer()
+            }
+        }
+    }
+    
+    // MARK: - Chat Input Section
+    private var chatInputSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                screenScanButton
+                imageUploadButton
+                textInputArea
+            }
+        }
+    }
+    
+    // MARK: - Screen Scan Button
+    private var screenScanButton: some View {
+        Group {
+            if selectedImage == nil {
+                Button(action: {
+                    if !isLoading && !isCapturingScreenshot {
+                        captureScreenshot()
+                    }
+                }) {
+                    Image(systemName: isCapturingScreenshot ? "camera.fill" : "camera.viewfinder")
+                        .font(.system(size: 16))
+                        .foregroundColor(isLoading ? .secondary.opacity(0.5) : (isCapturingScreenshot ? .green : .secondary))
+                        .frame(width: 44, height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(.regularMaterial)
+                                .opacity(isLoading ? 0.5 : 1.0)
+                                .overlay(
+                                    isCapturingScreenshot ? 
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.green.opacity(0.2)) : nil
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading || isCapturingScreenshot)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isCapturingScreenshot ? Color.green.opacity(0.4) : (isScreenshotButtonHovered ? .white.opacity(0.5) : .white.opacity(0.3)), lineWidth: 0.5)
+                )
+                .help(isLoading ? "Please wait..." : (isCapturingScreenshot ? "Capturing screenshot..." : "Take screenshot of your design"))
+                .onHover { isHovering in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isScreenshotButtonHovered = isHovering
                     }
                 }
             }
+        }
+    }
+    
+    // MARK: - Image Upload Button
+    private var imageUploadButton: some View {
+        ZStack {
+            Button(action: {
+                if !isLoading && selectedImage == nil {
+                    selectImageFile()
+                }
+            }) {
+                Image(systemName: selectedImage != nil ? "photo.fill" : "photo")
+                    .font(.system(size: 16))
+                    .foregroundColor(isLoading ? .secondary.opacity(0.5) : (selectedImage != nil ? .blue : .secondary))
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.regularMaterial)
+                            .opacity(isLoading ? 0.5 : 1.0)
+                            .overlay(
+                                selectedImage != nil ? 
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.blue.opacity(0.2)) : nil
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(selectedImage != nil ? Color.blue.opacity(0.4) : (isUploadButtonHovered ? .white.opacity(0.5) : .white.opacity(0.3)), lineWidth: 0.5)
+            )
+            .help(isLoading ? "Please wait..." : (selectedImage != nil ? "Remove image" : "Upload image"))
+            .onHover { isHovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isUploadButtonHovered = isHovering
+                }
             }
             
+            // Red X mark overlay when image is selected
+            if selectedImage != nil {
+                Button(action: {
+                    if !isLoading {
+                        selectedImage = nil
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .background(Color.white, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .offset(y: -15)
+                .offset(x: 17)
+            }
         }
-        .padding(12)
-        .frame(minWidth: 380, maxWidth: .infinity)
-        .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
+    }
+    
+    // MARK: - Text Input Area
+    private var textInputArea: some View {
+        ZStack(alignment: .trailing) {
+            VStack(spacing: 0) {
+                if selectedImage == nil {
+                    basicTextInput
+                }
+                
+                if selectedImage != nil {
+                    multiStepInput
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.regularMaterial)
+                    .opacity(isLoading ? 0.5 : 1.0)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.white.opacity(0.3), lineWidth: 0.5)
+            )
+            
+            // Send button - only show when no image (step 3 has its own send button)
+            if selectedImage == nil {
+                sendButton
+            }
+            
+            // Next button for steps 1 and 2 - positioned on the right side
+            if selectedImage != nil && currentStep < 3 {
+                nextButton
+            }
+        }
+    }
+    
+    // MARK: - Basic Text Input
+    private var basicTextInput: some View {
+        TextField(placeholderText, text: $chatText)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.trailing, 40) // Make space for the send button
+            .frame(height: 44)
+            .background(Color.clear)
+            .disabled(isLoading)
+            .onSubmit {
+                if !isLoading {
+                    sendMessage()
+                }
+            }
+    }
+    
+    // MARK: - Multi-Step Input
+    private var multiStepInput: some View {
+        VStack(spacing: 0) {
+            stepContent
+            progressBar
+        }
+    }
+    
+    // MARK: - Step Content
+    private var stepContent: some View {
+        Group {
+            switch currentStep {
+            case 1:
+                step1Content
+            case 2:
+                step2Content
+            case 3:
+                step3Content
+            default:
+                EmptyView()
+            }
+        }
+    }
+    
+    // MARK: - Step 1 Content
+    private var step1Content: some View {
+        VStack(spacing: 12) {
+            // Step title
+            HStack {
+                Text("Image type?")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(.primary .opacity(0.5))
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            
+            // Tags
+            HStack(spacing: 4) {
+                inputTypeButton("Component")
+                inputTypeButton("Screen")
+                inputTypeButton("Flow")
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+    }
+    
+    // MARK: - Step 2 Content
+    private var step2Content: some View {
+        VStack(spacing: 12) {
+            // Step title with back button
+            HStack {
+                Button(action: {
+                    currentStep = 1
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.primary .opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                
+                Text("Product type?")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(.primary .opacity(0.5))
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            
+            // Tags
+            HStack(spacing: 4) {
+                productTypeButton("SaaS")
+                productTypeButton("Mobile")
+                productTypeButton("Ecommerce")
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+    }
+    
+    // MARK: - Step 3 Content
+    private var step3Content: some View {
+        VStack(spacing: 12) {
+            // Step title with back button
+            HStack {
+                Button(action: {
+                    currentStep = 2
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.primary .opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                
+                Text("Additional context?")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(.primary .opacity(0.5))
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            
+            // Text input for step 3 with send button
+            ZStack(alignment: .trailing) {
+                TextField(placeholderText, text: $descriptionText)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .padding(.trailing, 40) // Make space for the send button
+                    .background(Color.clear)
+                    .disabled(isLoading)
+                    .onSubmit {
+                        if !isLoading {
+                            handleStepAction()
+                        }
+                    }
+                
+                // Send button for step 3
+                Button(action: {
+                    handleStepAction()
+                }) {
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundColor(.white)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(isButtonDisabled())
+                .padding(.trailing, 12)
+            }
+        }
+    }
+    
+    // MARK: - Input Type Button
+    private func inputTypeButton(_ type: String) -> some View {
+        Button(type) {
+            selectedInputType = type
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 80)
+                .fill(selectedInputType == type ? Color.white : Color.white.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 80)
+                .stroke(selectedInputType == type ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
+        )
+        .foregroundStyle(selectedInputType == type ? Color.blue : Color.white.opacity(0.5))
+    }
+    
+    // MARK: - Product Type Button
+    private func productTypeButton(_ type: String) -> some View {
+        Button(type) {
+            selectedProductType = type
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 80)
+                .fill(selectedProductType == type ? Color.white : Color.white.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 80)
+                .stroke(selectedProductType == type ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
+        )
+        .foregroundStyle(selectedProductType == type ? Color.blue : Color.white.opacity(0.5))
+    }
+    
+    // MARK: - Progress Bar
+    private var progressBar: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Background bar
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(height: 1)
+                
+                // Progress bar
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: geometry.size.width * getProgressPercentage(), height: 1)
+            }
+        }
+        .frame(height: 1)
+        .padding(.horizontal, 20)
+    }
+    
+    // MARK: - Send Button
+    private var sendButton: some View {
+        Button(action: {
+            sendMessage()
+        }) {
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else {
+                // Show send icon for no image
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(isSendButtonHovered ? .white.opacity(0.8) : .white)
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(isButtonDisabled())
+        .padding(.trailing, 12)
+        .padding(.bottom, 0)
+        .onHover { isHovering in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSendButtonHovered = isHovering
+            }
+        }
+    }
+    
+    // MARK: - Next Button
+    private var nextButton: some View {
+        Button(action: {
+            handleStepAction()
+        }) {
+            Image(systemName: "arrow.right")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(Color.white.opacity(0.5))
+        }
+        .buttonStyle(.borderless)
+        .disabled(isButtonDisabled())
+        .padding(.trailing, 12)
+        .padding(.bottom, 8)
     }
     
     private func selectImageFile() {
