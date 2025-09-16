@@ -11,8 +11,8 @@ import AppKit
 // MARK: - Dust Service
 @MainActor
 class DustService: ObservableObject {
-    private let supabaseUrl = "https://iiolvvdnzrfcffudwocp.supabase.co"
-    private let supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlpb2x2dmRuenJmY2ZmdWR3b2NwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2MTIxNzQsImV4cCI6MjA3MTE4ODE3NH0.zm_bLL3lu2hXKqZdIHzH-bIgVwd1cM1jb7Cju92sl6E"
+    private let supabaseUrl = DustConfig.supabaseUrl
+    private let supabaseKey = DustConfig.supabaseKey
     
     // Supabase function endpoint
     private var designBrainEndpoint: String {
