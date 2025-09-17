@@ -345,7 +345,10 @@ struct MenuBarView: View {
     @State private var chatText: String = ""
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
-    @StateObject private var dustService = DustService()
+    // Replaced DustService with ChatService and shared settings
+    @State private var currentSystemPrompt: String = ""
+    @State private var currentProvider: String = ""
+    @State private var currentModel: String = ""
     @State private var selectedImage: NSImage?
     @State private var loadingMessageIndex: Int = 0
     @State private var loadingTimer: Timer?
@@ -403,6 +406,30 @@ struct MenuBarView: View {
         print("📱 [DEBUG] MenuBarView initializing")
     }
     
+    // Build last 20 messages (10 turns) history for API
+    private func buildHistoryDTO() -> [ChatMessageDTO] {
+        let mapped = messages.map { msg in
+            ChatMessageDTO(role: msg.sender == .user ? "user" : "assistant", content: msg.text)
+        }
+        return Array(mapped.suffix(20))
+    }
+
+    // Load shared settings from Supabase
+    private func loadSharedSettings() {
+        Task {
+            do {
+                let (systemPrompt, provider, model) = try await SettingsService.shared.loadSharedSettings()
+                await MainActor.run {
+                    self.currentSystemPrompt = systemPrompt
+                    self.currentProvider = provider
+                    self.currentModel = model
+                }
+            } catch {
+                print("⚠️ Failed to load shared settings: \(error)")
+            }
+        }
+    }
+
     // Start cycling through loading messages
     private func startLoadingMessages() {
         loadingMessageIndex = 0
@@ -427,6 +454,12 @@ struct MenuBarView: View {
         .frame(minWidth: 380, maxWidth: .infinity)
         .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
         .background(Color.clear) // Ensure transparent background for glass effect
+        .onAppear {
+            loadSharedSettings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loadSharedSettings()
+        }
     }
     
     // MARK: - Header Section
@@ -1282,28 +1315,44 @@ struct MenuBarView: View {
         isLoading = true
         startLoadingMessages()
         
-        Task {
-            do {
-                let response = try await dustService.sendMessage(
-                    messageText.isEmpty ? "Please analyze this image." : messageText,
-                    image: imageToSend
-                )
-                
-                await MainActor.run {
-                    let responseMessage = ChatMessage(text: response, sender: .agent)
-                    messages.append(responseMessage)
+        // Streaming call via ChatService
+        var assistantIndex: Int?
+        messages.append(ChatMessage(text: "", sender: .agent))
+        assistantIndex = messages.count - 1
+        let historyDTO = buildHistoryDTO()
+        ChatService.shared.sendChat(
+            provider: currentProvider,
+            model: currentModel,
+            systemPrompt: currentSystemPrompt,
+            messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
+            image: imageToSend,
+            history: historyDTO,
+            onDelta: { delta in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        let existing = messages[idx]
+                        messages[idx] = ChatMessage(text: existing.text + delta, sender: .agent)
+                    }
+                }
+            },
+            onDone: { finalText in
+                DispatchQueue.main.async {
                     isLoading = false
                     stopLoadingMessages()
                 }
-            } catch {
-                await MainActor.run {
-                    let errorMessage = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
-                    messages.append(errorMessage)
+            },
+            onError: { error in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        messages[idx] = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
+                    } else {
+                        messages.append(ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent))
+                    }
                     isLoading = false
                     stopLoadingMessages()
                 }
             }
-        }
+        )
     }
     
     
@@ -1335,25 +1384,43 @@ Most impactful improvement :
         isLoading = true
         startLoadingMessages()
         
-        Task {
-            do {
-                let response = try await dustService.sendMessage(taggedMessage, image: nil)
-                
-                await MainActor.run {
-                    let responseMessage = ChatMessage(text: response, sender: .agent)
-                    messages.append(responseMessage)
+        var assistantIndex: Int?
+        messages.append(ChatMessage(text: "", sender: .agent))
+        assistantIndex = messages.count - 1
+        let historyDTO = buildHistoryDTO()
+        ChatService.shared.sendChat(
+            provider: currentProvider,
+            model: currentModel,
+            systemPrompt: currentSystemPrompt,
+            messageText: taggedMessage,
+            image: nil,
+            history: historyDTO,
+            onDelta: { delta in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        let existing = messages[idx]
+                        messages[idx] = ChatMessage(text: existing.text + delta, sender: .agent)
+                    }
+                }
+            },
+            onDone: { _ in
+                DispatchQueue.main.async {
                     isLoading = false
                     stopLoadingMessages()
                 }
-            } catch {
-                await MainActor.run {
-                    let errorMessage = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
-                    messages.append(errorMessage)
+            },
+            onError: { error in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        messages[idx] = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
+                    } else {
+                        messages.append(ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent))
+                    }
                     isLoading = false
                     stopLoadingMessages()
                 }
             }
-        }
+        )
     }
     
     private func sendMessage() {
@@ -1389,27 +1456,42 @@ Most impactful improvement :
         isLoading = true
         startLoadingMessages()
         
-        Task {
-            do {
-                let response = try await dustService.sendMessage(
-                    messageText.isEmpty ? "Please analyze this image." : messageText,
-                    image: imageToSend
-                )
-                
-                await MainActor.run {
-                    let responseMessage = ChatMessage(text: response, sender: .agent)
-                    messages.append(responseMessage)
+        var assistantIndex: Int?
+        messages.append(ChatMessage(text: "", sender: .agent))
+        assistantIndex = messages.count - 1
+        let historyDTO = buildHistoryDTO()
+        ChatService.shared.sendChat(
+            provider: currentProvider,
+            model: currentModel,
+            systemPrompt: currentSystemPrompt,
+            messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
+            image: imageToSend,
+            history: historyDTO,
+            onDelta: { delta in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        let existing = messages[idx]
+                        messages[idx] = ChatMessage(text: existing.text + delta, sender: .agent)
+                    }
+                }
+            },
+            onDone: { _ in
+                DispatchQueue.main.async {
                     isLoading = false
                     stopLoadingMessages()
                 }
-            } catch {
-                await MainActor.run {
-                    let errorMessage = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
-                    messages.append(errorMessage)
+            },
+            onError: { error in
+                DispatchQueue.main.async {
+                    if let idx = assistantIndex {
+                        messages[idx] = ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent)
+                    } else {
+                        messages.append(ChatMessage(text: "Error: \(error.localizedDescription)", sender: .agent))
+                    }
                     isLoading = false
                     stopLoadingMessages()
                 }
             }
-        }
+        )
     }
 }
