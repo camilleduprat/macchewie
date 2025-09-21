@@ -106,8 +106,8 @@ class DustService: ObservableObject {
                    let data = responseDict["data"] as? [String: Any],
                    let text = data["text"] as? String {
                     return text
-                } else if let error = responseDict["error"] as? [String: Any],
-                          let hint = error["hint"] as? String {
+                } else if let error = responseDict["error"] as? [String: Any] {
+                    let hint = error["hint"] as? String ?? "Unknown error"
                     throw DustError.apiError(statusCode: httpResponse.statusCode, message: hint)
                 }
             }
@@ -130,7 +130,7 @@ enum DustError: Error, LocalizedError {
         switch self {
         case .invalidResponse:
             return "🤖 Invalid response from server"
-        case .apiError(let _, let message):
+        case .apiError(_, let message):
             return "🤖 \(message)"
         case .streamError:
             return "🤖 Streaming issue - Couldn't get the agent's response in real-time"

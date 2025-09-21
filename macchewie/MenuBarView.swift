@@ -342,6 +342,7 @@ struct AgentOutputView: View {
 }
 
 struct MenuBarView: View {
+    @State private var userEmail: String = UserDefaults.standard.string(forKey: "user_email") ?? ""
     @State private var chatText: String = ""
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
@@ -367,6 +368,9 @@ struct MenuBarView: View {
     @State private var isCapturingScreenshot: Bool = false
     @State private var screenshotTimeoutTimer: Timer?
     @State private var isArgumentsExpanded: Bool = false
+    
+    // Conversation management (simplified - no UI)
+    @State private var currentConversationId: String?
     
     // Loading messages to cycle through
     private let loadingMessages = [
@@ -414,11 +418,25 @@ struct MenuBarView: View {
         return Array(mapped.suffix(20))
     }
 
+    private func loadUserEmail() {
+        let storedEmail = UserDefaults.standard.string(forKey: "user_email") ?? ""
+        print("🔍 [MenuBarView] Loading email from UserDefaults: '\(storedEmail)'")
+        userEmail = storedEmail
+        print("🔍 [MenuBarView] userEmail state updated to: '\(userEmail)'")
+        
+        // No conversation history loading - Mac app only caches local messages
+        if !userEmail.isEmpty {
+            // Just create a new conversation for this session
+            createNewConversation()
+        }
+    }
+    
+    
     // Load shared settings from Supabase
     private func loadSharedSettings() {
         Task {
             do {
-                let (systemPrompt, provider, model) = try await SettingsService.shared.loadSharedSettings()
+                let (systemPrompt, provider, model) = try await SettingsService.shared.loadSharedSettings(email: userEmail)
                 await MainActor.run {
                     self.currentSystemPrompt = systemPrompt
                     self.currentProvider = provider
@@ -426,6 +444,23 @@ struct MenuBarView: View {
                 }
             } catch {
                 print("⚠️ Failed to load shared settings: \(error)")
+            }
+        }
+    }
+    
+    // Create new conversation (simplified - no UI)
+    private func createNewConversation() {
+        guard !userEmail.isEmpty else { return }
+        
+        Task {
+            do {
+                let conversation = try await ConversationService.shared.createConversation(email: userEmail)
+                await MainActor.run {
+                    self.currentConversationId = conversation.id
+                    self.messages.removeAll()
+                }
+            } catch {
+                print("⚠️ Failed to create conversation: \(error)")
             }
         }
     }
@@ -446,19 +481,32 @@ struct MenuBarView: View {
     }
     
     var body: some View {
-        VStack(spacing: 16) {
-            headerSection
-            mainContent
-        }
-        .padding(12)
-        .frame(minWidth: 380, maxWidth: .infinity)
-        .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
-        .background(Color.clear) // Ensure transparent background for glass effect
-        .onAppear {
-            loadSharedSettings()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            loadSharedSettings()
+        Group {
+            if !userEmail.isEmpty {
+                VStack(spacing: 16) {
+                    headerSection
+                    mainContent
+                }
+                .padding(12)
+                .frame(minWidth: 380, maxWidth: .infinity)
+                .frame(minHeight: messages.isEmpty ? 120 : 720, maxHeight: .infinity)
+                .background(Color.clear) // Ensure transparent background for glass effect
+                    .onAppear {
+                        loadUserEmail()
+                        loadSharedSettings()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                        loadUserEmail()
+                        loadSharedSettings()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("EmailStored"))) { _ in
+                        print("🔍 [MenuBarView] Received EmailStored notification")
+                        loadUserEmail()
+                        loadSharedSettings()
+                    }
+            } else {
+                AuthView(userEmail: $userEmail)
+            }
         }
     }
     
@@ -467,7 +515,7 @@ struct MenuBarView: View {
         HStack {
             Spacer()
             
-            // Right side: Both buttons with 8px spacing
+            // Right side: Action buttons
             HStack(spacing: 0) {
                 // Reset button
                 Button(action: {
@@ -539,12 +587,62 @@ struct MenuBarView: View {
                         isAppButtonHovered = isHovering
                     }
                 }
+                
+                // Profile button with dropdown
+                Menu {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Logged in as")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(userEmail)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    
+                    Divider()
+                    
+                    Button(action: {
+                        // Clear stored email and reset to auth view
+                        UserDefaults.standard.removeObject(forKey: "user_email")
+                        userEmail = ""
+                        // Clear local messages when signing out
+                        messages.removeAll()
+                        currentConversationId = nil
+                    }) {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                        
+                        Text(userEmail.components(separatedBy: "@").first ?? "User")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .help("Profile & Settings")
             }
         }
         .padding(.horizontal, 0)
         .padding(.vertical, 0)
         .frame(height: 36) // Fixed height to prevent layout shift on hover
     }
+    
     
     // MARK: - Main Content
     private var mainContent: some View {
@@ -1235,6 +1333,8 @@ struct MenuBarView: View {
         isLoading = false
         stopLoadingMessages()
         
+        // Create new conversation for data sync
+        createNewConversation()
     }
     
     private func handleStepAction() {
@@ -1320,6 +1420,19 @@ struct MenuBarView: View {
         messages.append(ChatMessage(text: "", sender: .agent))
         assistantIndex = messages.count - 1
         let historyDTO = buildHistoryDTO()
+        
+        // Use email-based ChatService with conversation ID
+        guard !userEmail.isEmpty else {
+            DispatchQueue.main.async {
+                if let idx = assistantIndex {
+                    messages[idx] = ChatMessage(text: "Error: Not authenticated", sender: .agent)
+                }
+                isLoading = false
+                stopLoadingMessages()
+            }
+            return
+        }
+        
         ChatService.shared.sendChat(
             provider: currentProvider,
             model: currentModel,
@@ -1327,6 +1440,8 @@ struct MenuBarView: View {
             messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
             image: imageToSend,
             history: historyDTO,
+            conversationId: currentConversationId,
+            email: userEmail,
             onDelta: { delta in
                 DispatchQueue.main.async {
                     if let idx = assistantIndex {
@@ -1388,6 +1503,19 @@ Most impactful improvement :
         messages.append(ChatMessage(text: "", sender: .agent))
         assistantIndex = messages.count - 1
         let historyDTO = buildHistoryDTO()
+        
+        // Use email-based ChatService with conversation ID
+        guard !userEmail.isEmpty else {
+            DispatchQueue.main.async {
+                if let idx = assistantIndex {
+                    messages[idx] = ChatMessage(text: "Error: Not authenticated", sender: .agent)
+                }
+                isLoading = false
+                stopLoadingMessages()
+            }
+            return
+        }
+        
         ChatService.shared.sendChat(
             provider: currentProvider,
             model: currentModel,
@@ -1395,6 +1523,8 @@ Most impactful improvement :
             messageText: taggedMessage,
             image: nil,
             history: historyDTO,
+            conversationId: currentConversationId,
+            email: userEmail,
             onDelta: { delta in
                 DispatchQueue.main.async {
                     if let idx = assistantIndex {
@@ -1460,6 +1590,19 @@ Most impactful improvement :
         messages.append(ChatMessage(text: "", sender: .agent))
         assistantIndex = messages.count - 1
         let historyDTO = buildHistoryDTO()
+        
+        // Use email-based ChatService with conversation ID
+        guard !userEmail.isEmpty else {
+            DispatchQueue.main.async {
+                if let idx = assistantIndex {
+                    messages[idx] = ChatMessage(text: "Error: Not authenticated", sender: .agent)
+                }
+                isLoading = false
+                stopLoadingMessages()
+            }
+            return
+        }
+        
         ChatService.shared.sendChat(
             provider: currentProvider,
             model: currentModel,
@@ -1467,6 +1610,8 @@ Most impactful improvement :
             messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
             image: imageToSend,
             history: historyDTO,
+            conversationId: currentConversationId,
+            email: userEmail,
             onDelta: { delta in
                 DispatchQueue.main.async {
                     if let idx = assistantIndex {
