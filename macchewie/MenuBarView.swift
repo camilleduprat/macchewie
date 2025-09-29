@@ -426,8 +426,11 @@ struct MenuBarView: View {
         
         // No conversation history loading - Mac app only caches local messages
         if !userEmail.isEmpty {
-            // Just create a new conversation for this session
-            createNewConversation()
+            // Only create a new conversation when there isn't one already and
+            // we're not currently displaying or streaming messages.
+            if currentConversationId == nil && messages.isEmpty && !isLoading {
+                createNewConversation()
+            }
         }
     }
     
@@ -457,7 +460,6 @@ struct MenuBarView: View {
                 let conversation = try await ConversationService.shared.createConversation(email: userEmail)
                 await MainActor.run {
                     self.currentConversationId = conversation.id
-                    self.messages.removeAll()
                 }
             } catch {
                 print("⚠️ Failed to create conversation: \(error)")
@@ -1437,7 +1439,7 @@ struct MenuBarView: View {
             provider: currentProvider,
             model: currentModel,
             systemPrompt: currentSystemPrompt,
-            messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
+            messageText: messageText.isEmpty ? "please analyze this picture" : messageText,
             image: imageToSend,
             history: historyDTO,
             conversationId: currentConversationId,
@@ -1520,7 +1522,7 @@ Most impactful improvement :
             provider: currentProvider,
             model: currentModel,
             systemPrompt: currentSystemPrompt,
-            messageText: taggedMessage,
+            messageText: taggedMessage.isEmpty ? "please analyze this picture" : taggedMessage,
             image: nil,
             history: historyDTO,
             conversationId: currentConversationId,
@@ -1607,7 +1609,7 @@ Most impactful improvement :
             provider: currentProvider,
             model: currentModel,
             systemPrompt: currentSystemPrompt,
-            messageText: messageText.isEmpty ? "Please analyze this image." : messageText,
+            messageText: messageText.isEmpty ? "please analyze this picture" : messageText,
             image: imageToSend,
             history: historyDTO,
             conversationId: currentConversationId,
