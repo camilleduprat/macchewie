@@ -9,6 +9,17 @@ import SwiftUI
 import Foundation
 import AppKit
 import CoreGraphics
+// MARK: - Environment Key for "Go deeper"
+private struct SendGoDeeperKey: EnvironmentKey {
+    static let defaultValue: ((String) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var sendGoDeeper: ((String) -> Void)? {
+        get { self[SendGoDeeperKey.self] }
+        set { self[SendGoDeeperKey.self] = newValue }
+    }
+}
 
 // MARK: - Message Structure
 enum MessageSender {
@@ -102,6 +113,113 @@ class AgentOutputParser {
         }
         
         return AgentOutput(solutions: solutions, categories: categories)
+    }
+}
+
+// MARK: - New Output Models (Product/Industry/Platform, Solutions, Recommendation, Punchline)
+struct NewAgentOutput {
+    let product: String?
+    let industry: String?
+    let platform: String?
+    let solutions: [NewSolution]
+    let recommendation: String?
+    let punchline: String?
+}
+
+struct NewSolution {
+    let title: String
+    let explanation: String?
+}
+
+class NewAgentOutputParser {
+    static func parse(_ text: String) -> NewAgentOutput {
+        let lines = text.components(separatedBy: .newlines)
+        var product: String?
+        var industry: String?
+        var platform: String?
+        var solutions: [NewSolution] = []
+        var recommendation: String?
+        var punchline: String?
+        
+        // Parse header line: Product: [X] | Industry: [Y] | Platform: [iOS/Android/Web/Desktop]
+        if let header = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("Product:") }) {
+            let parts = header.components(separatedBy: "|")
+            for part in parts {
+                let trimmed = part.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("Product:") {
+                    product = trimmed.replacingOccurrences(of: "Product:", with: "").trimmingCharacters(in: .whitespaces)
+                } else if trimmed.hasPrefix("Industry:") {
+                    industry = trimmed.replacingOccurrences(of: "Industry:", with: "").trimmingCharacters(in: .whitespaces)
+                } else if trimmed.hasPrefix("Platform:") {
+                    platform = trimmed.replacingOccurrences(of: "Platform:", with: "").trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+        
+        // Solutions: lines starting with ✅
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("✅") else { continue }
+            // Remove the leading checkmark and any following space
+            let afterCheck = trimmed.dropFirst(1).trimmingCharacters(in: .whitespaces)
+            // Prefer splitting at the first ':' to separate title and explanation
+            if let colon = afterCheck.firstIndex(of: ":") {
+                let title = afterCheck[..<colon].trimmingCharacters(in: .whitespaces)
+                let explanation = afterCheck[afterCheck.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                solutions.append(NewSolution(title: String(title), explanation: explanation.isEmpty ? nil : String(explanation)))
+            } else if let eq = afterCheck.firstIndex(of: "=") { // fallback to '=' pattern if present
+                let title = afterCheck[..<eq].trimmingCharacters(in: .whitespaces)
+                let rest = afterCheck[afterCheck.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+                solutions.append(NewSolution(title: String(title), explanation: rest.isEmpty ? nil : String(rest)))
+            } else {
+                // Entire line is title if no separator
+                solutions.append(NewSolution(title: String(afterCheck), explanation: nil))
+            }
+        }
+        
+        // Recommendation:
+        if let recLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("Recommendation:") }) {
+            recommendation = recLine.replacingOccurrences(of: "Recommendation:", with: "").trimmingCharacters(in: .whitespaces)
+        }
+        
+        // Punchline:
+        if let punchLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("Punchline:") }) {
+            punchline = punchLine.replacingOccurrences(of: "Punchline:", with: "").trimmingCharacters(in: .whitespaces)
+        }
+        
+        return NewAgentOutput(
+            product: product,
+            industry: industry,
+            platform: platform,
+            solutions: solutions,
+            recommendation: recommendation,
+            punchline: punchline
+        )
+    }
+}
+
+// MARK: - Follow-up Bullets (✨ ...)
+struct BulletPoint {
+    let text: String
+}
+
+class BulletPointParser {
+    static func parse(_ text: String) -> [BulletPoint] {
+        let lines = text.components(separatedBy: .newlines)
+        var bullets: [BulletPoint] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            // Filter out Screens/Flows/COMMAND lines
+            if trimmed.hasPrefix("👉") || trimmed.uppercased().hasPrefix("COMMAND:") { continue }
+            if trimmed.hasPrefix("✨") {
+                let content = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
+                if !content.isEmpty {
+                    bullets.append(BulletPoint(text: content))
+                }
+            }
+        }
+        return bullets
     }
 }
 
@@ -510,6 +628,10 @@ struct MenuBarView: View {
                 AuthView(userEmail: $userEmail)
             }
         }
+        // Environment hook to send "Go deeper" programmatically
+        .environment(\.sendGoDeeper, { details in
+            sendTaggedMessage(details)
+        })
     }
     
     // MARK: - Header Section
@@ -682,8 +804,39 @@ struct MenuBarView: View {
     // MARK: - Individual Message View
     private func messageView(for message: ChatMessage, at index: Int) -> some View {
         Group {
-            // Check if this message contains agent output format
-            if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
+            // Prefer structured solution rendering when present, to avoid being overridden by a trailing Recommendation line
+            if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") || message.text.contains("Product:") {
+                let output = NewAgentOutputParser.parse(message.text)
+                // If the new-structure parser yields solutions, render with NewAgentOutputView; otherwise fallback to legacy parser
+                if !output.solutions.isEmpty || message.text.contains("Product:") {
+                    NewAgentOutputView(output: output)
+                        .padding(.horizontal, 8)
+                        .id("message-\(index)")
+                } else {
+                    let legacy = AgentOutputParser.parse(message.text)
+                    AgentOutputView(
+                        output: legacy,
+                        onSolutionMoreTapped: { solution in
+                            sendTaggedMessage(solution)
+                        },
+                        isArgumentsExpanded: $isArgumentsExpanded
+                    )
+                    .padding(.horizontal, 8)
+                    .id("message-\(index)")
+                }
+            } else if message.text.contains("✨") || message.text.contains("Recommendation:") || message.text.contains("Punchline:") {
+                // Follow-up bullets & recommendation-only messages
+                let bullets = BulletPointParser.parse(message.text)
+                let output = NewAgentOutputParser.parse(message.text)
+                FollowUpCombinedView(bullets: bullets, recommendation: output.recommendation, punchline: output.punchline)
+                    .padding(.horizontal, 8)
+                    .id("message-\(index)")
+            } else if message.text.contains("Product:") || message.text.contains("Punchline:") {
+                let output = NewAgentOutputParser.parse(message.text)
+                NewAgentOutputView(output: output)
+                    .padding(.horizontal, 8)
+                    .id("message-\(index)")
+            } else if message.text.contains("⭐️") || message.text.contains("🔴") || message.text.contains("🟢") || message.text.contains("✅") {
                 // Parse and display as structured cards
                 let output = AgentOutputParser.parse(message.text)
                 AgentOutputView(
@@ -698,6 +851,238 @@ struct MenuBarView: View {
             } else {
                 // Display as regular message with optional image
                 regularMessageView(for: message, at: index)
+            }
+        }
+    }
+
+    // MARK: - New Output Views
+    struct NewAgentOutputView: View {
+        let output: NewAgentOutput
+        @Environment(\.sendGoDeeper) private var sendGoDeeper
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                if let header = headerText(output: output) {
+                    Text(header)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.secondary)
+                        .padding(.horizontal, 8)
+                }
+                
+                // Up to 3 solution cards with collapsible explanation
+                ForEach(Array(output.solutions.prefix(3)).indices, id: \.self) { idx in
+                    NewSolutionCard(solution: output.solutions[idx]) { details in
+                        sendGoDeeper?(details)
+                    }
+                }
+                
+                if let rec = output.recommendation, !rec.isEmpty {
+                    RecommendationCard(text: rec)
+                }
+                
+                if let punch = output.punchline, !punch.isEmpty {
+                    PunchlineCard(text: punch)
+                }
+            }
+        }
+        
+        private func headerText(output: NewAgentOutput) -> String? {
+            let parts: [String] = [
+                output.product.map { "Product: \($0)" },
+                output.industry.map { "Industry: \($0)" },
+                output.platform.map { "Platform: \($0)" }
+            ].compactMap { $0 }
+            guard !parts.isEmpty else { return nil }
+            return parts.joined(separator: "  |  ")
+        }
+    }
+    
+    struct NewSolutionCard: View {
+        let solution: NewSolution
+        @State private var expanded: Bool = false
+        var onGoDeeper: ((String) -> Void)? = nil
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("✅")
+                        .font(.system(size: 16))
+                    
+                    Text(solution.title)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(Color.primary)
+                        .multilineTextAlignment(.leading)
+                    
+                    Spacer()
+                    Button("Go deeper") {
+                        let details = buildDetails()
+                        onGoDeeper?(details)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                
+                if let explanation = solution.explanation, !explanation.isEmpty {
+                    Button(expanded ? "Hide details" : "Show why") {
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0)) {
+                            expanded.toggle()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    
+                    if expanded {
+                        Text(explanation)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.secondary)
+                            .padding(.top, 4)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.green.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        
+        private func buildDetails() -> String {
+            if let explanation = solution.explanation, !explanation.isEmpty {
+                return "\(solution.title)\n\n\(explanation)\n\nTell me more about this"
+            } else {
+                return "\(solution.title)\n\nTell me more about this"
+            }
+        }
+    }
+    
+    struct RecommendationCard: View {
+        let text: String
+        @State private var expanded: Bool = false
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Recommendation")
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Button(expanded ? "Hide" : "Show") {
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0)) {
+                            expanded.toggle()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                if expanded {
+                    Text(text)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.primary)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                    )
+            )
+        }
+    }
+    
+    struct PunchlineCard: View {
+        let text: String
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("💡")
+                        .font(.system(size: 16))
+                    Text(text)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.primary)
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.yellow.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Bullet Cards View (✨ ...)
+    struct BulletCardsView: View {
+        let bullets: [BulletPoint]
+        @Environment(\.sendGoDeeper) private var sendGoDeeper
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(bullets.indices, id: \.self) { idx in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("✨")
+                            .font(.system(size: 16))
+                        Text(bullets[idx].text)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.primary)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                        Button("Go deeper") {
+                            let details = buildDetails(text: bullets[idx].text)
+                            sendGoDeeper?(details)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(NSColor.controlBackgroundColor))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                            )
+                    )
+                }
+            }
+        }
+        
+        private func buildDetails(text: String) -> String {
+            return "\(text)\n\nTell me more about this"
+        }
+    }
+
+    // MARK: - Follow-up Combined View (✨ bullets + optional recommendation/punchline)
+    struct FollowUpCombinedView: View {
+        let bullets: [BulletPoint]
+        let recommendation: String?
+        let punchline: String?
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                if !bullets.isEmpty {
+                    BulletCardsView(bullets: bullets)
+                }
+                if let rec = recommendation, !rec.isEmpty {
+                    RecommendationCard(text: rec)
+                }
+                if let p = punchline, !p.isEmpty {
+                    PunchlineCard(text: p)
+                }
             }
         }
     }
